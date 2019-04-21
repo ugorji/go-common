@@ -1,23 +1,19 @@
 # go-common
 
-The `go-common` library contains utility packages used across multiple projects 
-within this repository organization.
+The `go-common` library contains utility packages.
 
 It includes the following packages:
 
-- app
-- codec
-- combinationgen
-- db
-- feed
-- logging
-- pool
-- safestore
-- simpleblobstore
-- tree
-- util
-- vfs
-- zerror
+- combinationgen [README](combinationgen/README.md)
+- feed [README](feed/README.md)
+- logging [README](logging/README.md)
+- pool [README](pool/README.md)
+- safestore [README](/README.md)
+- simpleblobstore [README](simpleblobstore/README.md)
+- tree [README](tree/README.md)
+- util [README](util/README.md)
+- vfs [README](vfs/README.md)
+- zerror [README](zerror/README.md)
 
 ## Installing
 

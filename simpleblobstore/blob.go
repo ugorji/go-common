@@ -17,7 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ugorji/go-common/app"
+	"github.com/ugorji/go-serverapp/app"
 	"github.com/ugorji/go-common/zerror"
 )
 
