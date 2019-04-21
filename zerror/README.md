@@ -15,14 +15,12 @@ package zerror contains functions and types for error management.
 
 In general, idiomatic error handling in go follows the following principles:
 
-```
     - Panic for exceptional conditions. These include:
       Unexpected/invalid input parameters
       ...
     - Return errors for expected conditions e.g.
       file may not exist
       network may be down
-```
 
 To be explicit, do not return errors for invalid inputs. Instead, check the
 inputs and panic if invalid. This makes the APIs better (as error checking
@@ -31,11 +29,9 @@ done by the caller.
 
 Errors occur as a result of a number of things:
 
-```
     - An action generated an error which MUST be reported to callers with more context
     - An action generated an error which MUST be reported to callers AS IS
     - Something bad happened which MUST be reported to callers
-```
 
 When reporting an error with more context, user MUST add the action being
 performed
@@ -57,15 +53,12 @@ another function.
 
 In general, a rich error contains the following:
 
-```
     - what action was being performed?
     - what error (if any) occurred while performing this action?
     - where in the code did this occur?
-```
 
 In general, follow these rules when generating errors:
 
-```
     - Error messages are always in lower case
     - never have "error" in front of them
     - always fit in a single line (We already know it's an error message)
@@ -75,7 +68,6 @@ In general, follow these rules when generating errors:
     - When propagating an error, always propagate a new error appropriately (do not "blindly" throw errors).
     - Errors should be infrequent, so it is ok to determine whether to include
       "context" information when creating errors. I always do.
-```
 
 ## Exported Package API
 

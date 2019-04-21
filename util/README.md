@@ -17,7 +17,6 @@ It includes utility functions and utility types which across the codebase.
 
 The utility types include:
 
-```
     - tree (Int64, interface{})
     - bitset
     - combination generator
@@ -26,7 +25,6 @@ The utility types include:
     - lock set
     - safe store
     - virtual file system
-```
 
 ## Exported Package API
 
