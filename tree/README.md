@@ -16,9 +16,9 @@ with child nodes).
 
 ## You can
 
-    - represent a tree as a 1-dimensional slice
-    - walk a tree
-    - write tree out to an input stream as text.
+  - represent a tree as a 1-dimensional slice
+  - walk a tree
+  - write tree out to an input stream as text.
 
 This code has now been updated to remove reference to parents, and prevent
 the cyclic structure. This allows us to encode a Tree using gob.

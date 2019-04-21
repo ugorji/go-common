@@ -17,14 +17,14 @@ It includes utility functions and utility types which across the codebase.
 
 The utility types include:
 
-    - tree (Int64, interface{})
-    - bitset
-    - combination generator
-    - cron definition and support
-    - buffered byte reader which does not include copying (as compared to bytes.Buffer)
-    - lock set
-    - safe store
-    - virtual file system
+  - tree (Int64, interface{})
+  - bitset
+  - combination generator
+  - cron definition and support
+  - buffered byte reader which does not include copying (as compared to bytes.Buffer)
+  - lock set
+  - safe store
+  - virtual file system
 
 ## Exported Package API
 
