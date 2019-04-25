@@ -11,6 +11,9 @@ go get github.com/ugorji/go-common/combinationgen
 # Package Documentation
 
 
+Package combinationgen creates an iterator for all combinations of a
+(non-uniform) matrix.
+
 ## Exported Package API
 
 ```go

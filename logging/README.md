@@ -11,7 +11,7 @@ go get github.com/ugorji/go-common/logging
 # Package Documentation
 
 
-Precise logging package.
+Package logging provides a precise logging framework.
 
 A LogRecord can be sent by the application. It contains a level, message,
 timestamp, target (which subsystem the message came from) and PC information

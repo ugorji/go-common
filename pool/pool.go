@@ -1,13 +1,10 @@
-/*
-pool manages a pool of resources.
-*/
 package pool
 
 import (
 	"sync"
 	"time"
 
-	"github.com/ugorji/go-common/zerror"
+	"github.com/ugorji/go-common/errorutil"
 )
 
 type Action uint8
@@ -89,7 +86,7 @@ func (p *T) Put(v interface{}) (err error) {
 }
 
 func (p *T) Drain() error {
-	var merr zerror.Multi
+	var merr errorutil.Multi
 LOOP:
 	for len(p.ch) > 0 {
 		select {

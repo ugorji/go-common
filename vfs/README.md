@@ -11,6 +11,8 @@ go get github.com/ugorji/go-common/vfs
 # Package Documentation
 
 
+Package vfs implements a virtual file system.
+
 ## Exported Package API
 
 ```go

@@ -11,7 +11,7 @@ go get github.com/ugorji/go-common/pool
 # Package Documentation
 
 
-pool manages a pool of resources.
+Package pool manages a pool of resources.
 
 ## Exported Package API
 

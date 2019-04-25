@@ -11,6 +11,8 @@ go get github.com/ugorji/go-common/feed
 # Package Documentation
 
 
+Package feed supports Atom feeds.
+
 ## Exported Package API
 
 ```go

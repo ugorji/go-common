@@ -8,7 +8,7 @@ import (
 	"runtime/debug"
 	"math/rand"
 	"strings"
-	"github.com/ugorji/go-ztesting"
+	"github.com/ugorji/go-common/testutil"
 )
 
 var testSafestoreTbl = []struct {
@@ -40,13 +40,13 @@ func TestSafeStore(t *testing.T) {
 			v2 = rq.Get(tb.Key)
 		}
 		if !reflect.DeepEqual(v2, tb.Val) {
-			ztesting.Log(t, "Expecting: %v, Retrieved: %v", tb.Val, v2)
-			ztesting.Fail(t)
+			testutil.Log(t, "Expecting: %v, Retrieved: %v", tb.Val, v2)
+			testutil.Fail(t)
 			continue
 		}
 		if tb.TTL > 0 && vnil != nil {
-			ztesting.Log(t, "Expecting value to have expired but retrieved: %v", vnil)
-			ztesting.Fail(t)
+			testutil.Log(t, "Expecting value to have expired but retrieved: %v", vnil)
+			testutil.Fail(t)
 			continue
 		}
 	}

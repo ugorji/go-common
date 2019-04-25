@@ -1,4 +1,4 @@
-package util
+package ioutil
 
 // Anyone can use a bufio.Writer or bytes.Buffer to do buffering.
 // For reading though, bytes.Buffer incurs copying which we can avoid.

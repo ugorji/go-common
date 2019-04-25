@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 
-	"github.com/ugorji/go-common/zerror"
+	"github.com/ugorji/go-common/errorutil"
 )
 
 const (
@@ -154,7 +154,7 @@ func (vfs *Vfs) Matches(r *regexp.Regexp) []string {
 
 // Close this Vfs. It is especially useful for the zip type PathInfos in here.
 func (vfs *Vfs) Close() error {
-	em := make(zerror.Multi, 0, 2)
+	em := make(errorutil.Multi, 0, 2)
 	for _, pi := range vfs.pathinfos {
 		if pi.typ == vfsZipType {
 			if err := pi.zrc.Close(); err != nil {

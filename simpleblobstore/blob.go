@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/ugorji/go-serverapp/app"
-	"github.com/ugorji/go-common/zerror"
+	"github.com/ugorji/go-common/errorutil"
 )
 
 var (
@@ -139,7 +139,7 @@ func (bs blobKeyBytes) BlobId() uint64 {
 }
 
 func (w nblobw) Finish() (key string, err error) {
-	defer zerror.OnErrorf(1, &err, nil)
+	defer errorutil.OnErrorf(1, &err, nil)
 	if err = w.Close(); err != nil {
 		return
 	}
@@ -166,7 +166,7 @@ func (w nblobw) Finish() (key string, err error) {
 
 func (l BlobDriver) BlobWriter(ctx app.Context, contentType string,
 ) (b app.BlobWriter, err error) {
-	defer zerror.OnErrorf(1, &err, nil)
+	defer errorutil.OnErrorf(1, &err, nil)
 	bi := &app.BlobInfo{
 		ContentType:  contentType,
 		CreationTime: time.Now(),
@@ -183,7 +183,7 @@ func (l BlobDriver) BlobWriter(ctx app.Context, contentType string,
 }
 
 func (l BlobDriver) BlobReader(ctx app.Context, key string) (br app.BlobReader, err error) {
-	defer zerror.OnErrorf(1, &err, nil)
+	defer errorutil.OnErrorf(1, &err, nil)
 	reldir, blobf := blobKeyString(key).Location(l.Dir)
 	f, err := os.Open(filepath.Join(reldir, blobf))
 	if err != nil {
@@ -194,7 +194,7 @@ func (l BlobDriver) BlobReader(ctx app.Context, key string) (br app.BlobReader, 
 }
 
 func (l BlobDriver) BlobInfo(ctx app.Context, key string) (bi *app.BlobInfo, err error) {
-	defer zerror.OnErrorf(1, &err, nil)
+	defer errorutil.OnErrorf(1, &err, nil)
 	bs, err := blobKeyString(key).Bytes()
 	if err != nil {
 		return
@@ -207,7 +207,7 @@ func (l BlobDriver) BlobInfo(ctx app.Context, key string) (bi *app.BlobInfo, err
 
 func (l BlobDriver) BlobServe(c app.Context, key string,
 	response http.ResponseWriter) (err error) {
-	defer zerror.OnErrorf(1, &err, nil)
+	defer errorutil.OnErrorf(1, &err, nil)
 	f, err := os.Open(filepath.Join(l.Dir, key))
 	if err != nil {
 		return

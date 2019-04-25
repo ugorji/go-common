@@ -1,6 +1,6 @@
 //+build ignore
 
-package zerror
+package errorutil
 
 import (
 	"bytes"

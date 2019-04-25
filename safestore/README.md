@@ -11,6 +11,8 @@ go get github.com/ugorji/go-common/safestore
 # Package Documentation
 
 
+Package safestore provides a possibly threadsafe key-value cache.
+
 ## Exported Package API
 
 ```go

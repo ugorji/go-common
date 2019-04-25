@@ -1,47 +1,3 @@
-/*
- Precise logging package.
-
- A LogRecord can be sent by the application. It contains a level,
- message, timestamp, target (which subsystem the message came from) and
- PC information (file, line number).
-
- On the backend, Loggers (encapsulation of filter and handler/writer)
- are registered to a name.
-
- When a Record is created, it is dispatched to all registered
- Loggers. Each Logger will then publish the record if its filter accepts
- it.
-
- The easiest way to build a filter is off a Level. There's a convenience
- Filter for that.
-
- By default, a single logger is initialized bound by name "". It uses a
- built-in handler which writes a single line to the standard output
- stream.
-
- You can replace a logger by registering a non-nil handler and filter to
- the same name. You can remove a logger by registering a nil handler or
- filter to the same name.
-
- When a logger is added, the logging framework owns its lifecycle.
- The framework will call Open or Close as needed, especially during calls to
- AddLogger, or Close/Reopen.
-
- This package is designed to affect the whole process, thus all functions are
- package-level. At init time, it is a no-op. This way, different packages
- are free to use it as needed. A process needs to explicitly add loggers
- in its main() method to activate it.
-
- The logging package levels are roughly model'ed after syslog. It adds
- TRACE, and removes NOTICE, ALERT and EMERGENCY.
-
- NOTE
-
- Most of the helper methods (.Trace, .Debug, .Info, etc) all take a
- Context as the first parameter. Some environments require that context
- e.g. App Engine.
-
-*/
 package logging
 
 /*
@@ -66,8 +22,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ugorji/go-common/util"
-	"github.com/ugorji/go-common/zerror"
+	"github.com/ugorji/go-common/errorutil"
+	"github.com/ugorji/go-common/runtimeutil"
 )
 
 // Level is an int representing the log levels. It typically ranges from
@@ -107,8 +63,8 @@ var y = pkgArgs{
 
 var (
 	PopulatePCLevel = TRACE
-	EmptyMessageErr = zerror.String("logging: Empty Message")
-	ClosedErr       = zerror.String("logging: closed")
+	EmptyMessageErr = errorutil.String("logging: Empty Message")
+	ClosedErr       = errorutil.String("logging: closed")
 )
 
 func init() {
@@ -333,7 +289,7 @@ func FilterByLevel(level Level) FilterFunc {
 
 func logR(calldepth uint8, ctx interface{}, level Level, message string, params ...interface{},
 ) (err error) {
-	defer zerror.OnErrorf(1, &err, nil)
+	defer errorutil.OnErrorf(1, &err, nil)
 	if message == "" {
 		err = EmptyMessageErr
 		return
@@ -363,7 +319,7 @@ func logR(calldepth uint8, ctx interface{}, level Level, message string, params 
 			r.Level = level
 			if level >= PopulatePCLevel && calldepth >= 0 {
 				var xpline int
-				r.Target, r.ProgramFile, xpline, r.ProgramFunc = util.DebugLineInfo(calldepth+1, "?")
+				r.Target, r.ProgramFile, xpline, r.ProgramFunc = runtimeutil.DebugLineInfo(calldepth+1, "?")
 				r.ProgramLine = uint16(xpline)
 				//call Accept again, since we now know the target.
 				if ok, ferr = l.Filter.Accept(ctx, r.Target, level); ferr != nil {
@@ -403,7 +359,7 @@ func logR(calldepth uint8, ctx interface{}, level Level, message string, params 
 		// }()
 	}
 	if len(merrs) > 0 {
-		err = zerror.Multi(merrs)
+		err = errorutil.Multi(merrs)
 	}
 	return
 }
@@ -439,7 +395,7 @@ func Error(ctx interface{}, message string, params ...interface{}) error {
 	return logR(y.calldepthDelta, ctx, ERROR, message, params...)
 }
 
-// Error2 logs an error along with an associated message and possible Trace (if a zerror.Tracer).
+// Error2 logs an error along with an associated message and possible Trace (if a errorutil.Tracer).
 // It is a no-op if err is nil.
 func Error2(ctx interface{}, err error, message string, params ...interface{}) error {
 	if err == nil {
@@ -451,7 +407,7 @@ func Error2(ctx interface{}, err error, message string, params ...interface{}) e
 	buf.WriteString(" :: ")
 	buf.WriteString(err.Error())
 	// switch x := err.(type) {
-	// case zerror.Tracer:
+	// case errorutil.Tracer:
 	// 	x.ErrorTrace(&buf, "", "")
 	// default:
 	// 	buf.WriteString(err.Error())
@@ -496,7 +452,7 @@ func closeLoggers() error {
 	}
 	y.closed = true
 	if len(merrs) > 0 {
-		return zerror.Multi(merrs)
+		return errorutil.Multi(merrs)
 	}
 	return nil
 }
@@ -518,7 +474,7 @@ func openLoggers() error {
 	y.closed = false
 	go asyncLoop()
 	if len(merrs) > 0 {
-		return zerror.Multi(merrs)
+		return errorutil.Multi(merrs)
 	}
 	return nil
 }
@@ -527,7 +483,7 @@ func Reopen() error {
 	y.mu.Lock()
 	defer y.mu.Unlock()
 	// ensure you close and open errors back
-	return zerror.Multi([]error{closeLoggers(), openLoggers()}).NonNilError()
+	return errorutil.Multi([]error{closeLoggers(), openLoggers()}).NonNilError()
 }
 
 func Close() error {

@@ -11,10 +11,13 @@ go get github.com/ugorji/go-common/tree
 # Package Documentation
 
 
-The XXX types and corresponding functions supports a tree structure (node
-with child nodes).
+Package tree implements traversal of tree structures (parent node with child
+nodes).
 
-## You can
+The variant types and corresponding functions supports a tree structure
+(node with child nodes).
+
+You can:
 
   - represent a tree as a 1-dimensional slice
   - walk a tree
@@ -67,7 +70,7 @@ You can walk a slice or write it out to an input stream as text.
 
 During a walk, all the walk events are made available to the walk function.
 
-Walk Algorithm:
+## Walk Algorithm
 
 ```
     Perform EnterEvent operation
@@ -78,11 +81,27 @@ Walk Algorithm:
     if depth first, Perform VisitEvent operation
 ```
 
+
+## Code Generation
+
+any_tree.go is the generic version of the tree.
+
+We auto-generate the specific versions for an int64 tree and a uint64 tree.
+
+You can update gen.sh to auto-generate for other types.
+
+Run `go generate` (or gen.sh) in this directory to re-generate them.
+
+```
+    Make sure you run this each time any_tree.go is updated.
+```
+
 ## Exported Package API
 
 ```go
 var DefDesc = new(struct{}) ...
-var Int64DefDesc = int64(-2) ...
+var Int64DefDesc = int64(math.MinInt64 + 1) ...
+var Uint64DefDesc = uint64(math.MaxUint64 - 1) ...
 var StopDescent = errors.New("Stop Descent")
 type Codec struct{ ... }
     func NewCodec() Codec
@@ -93,5 +112,9 @@ type Int64Codec struct{ ... }
 type Int64Node struct{ ... }
 type Int64WalkFunc func(n *Int64Node, evt Event) (err error)
 type Node struct{ ... }
+type Uint64Codec struct{ ... }
+    func NewUint64Codec() Uint64Codec
+type Uint64Node struct{ ... }
+type Uint64WalkFunc func(n *Uint64Node, evt Event) (err error)
 type WalkFunc func(n *Node, evt Event) (err error)
 ```

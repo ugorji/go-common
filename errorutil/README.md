@@ -1,17 +1,17 @@
-# go-common/zerror
+# go-common/errorutil
 
-This repository contains the `go-common/zerror` library (or command).
+This repository contains the `go-common/errorutil` library (or command).
 
 To install:
 
 ```
-go get github.com/ugorji/go-common/zerror
+go get github.com/ugorji/go-common/errorutil
 ```
 
 # Package Documentation
 
 
-package zerror contains functions and types for error management.
+Package errorutil contains functions and types for error management.
 
 In general, idiomatic error handling in go follows the following principles:
 

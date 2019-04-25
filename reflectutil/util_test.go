@@ -1,4 +1,4 @@
-package util
+package reflectutil
 
 import (
 	"reflect"
@@ -6,7 +6,7 @@ import (
 )
 
 //define all the tests
-var testFmts = []testFmt {
+var testFmts = []testFmt{
 	{int(0), false, false},
 	{[]interface{}{"a", "b", "c"}, []string(nil), []string{"a", "b", "c"}},
 }
@@ -27,8 +27,7 @@ func TestCoerce1(t *testing.T) {
 		if !reflect.DeepEqual(val, tt.res) {
 			t.Errorf("Not Equal: Expected: %#v, Got: %#v", tt.res, val)
 			return
-		}		
+		}
 		t.Logf("Success: %#+v", tt)
 	}
 }
-

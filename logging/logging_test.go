@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"github.com/ugorji/go-ztesting"
+	"github.com/ugorji/go-common/testutil"
 )
 
 func TestHandleErr(t *testing.T) {
@@ -25,8 +25,8 @@ func TestHandleErr(t *testing.T) {
 	//fmt.Printf("%s", w.String())
 	s := w.String()
 	if !(strings.HasPrefix(s, "-\nWARNING") && strings.HasSuffix(s, "[logging_test.go:21] s58: ERROR1\n-\n")) {
-		ztesting.Log(t, "Received unexpected value: %s", s)
-		ztesting.Fail(t)
+		testutil.Log(t, "Received unexpected value: %s", s)
+		testutil.Fail(t)
 	}
 }
 

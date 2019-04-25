@@ -6,12 +6,15 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"github.com/ugorji/go-common/util"
+
+	"github.com/ugorji/go-common/ioutil"
+
 	// "runtime/debug"
 	"bytes"
 	"fmt"
 	"strings"
-	"github.com/ugorji/go-common/zerror"
+
+	"github.com/ugorji/go-common/errorutil"
 )
 
 // baseHandlerWriter can handle writing to a stream or a file.
@@ -20,7 +23,7 @@ type baseHandlerWriter struct {
 	w             io.Writer
 	w0            io.Writer
 	f             *os.File
-	bw            *util.BufWriter
+	bw            *ioutil.BufWriter
 	buf           []byte
 	flushInterval time.Duration
 	tick          *time.Ticker // used
@@ -62,16 +65,16 @@ func (h *baseHandlerWriter) Open() (err error) {
 		}
 	}
 	if h.w == nil {
-		return zerror.String("No Writer for Logging Handler")
+		return errorutil.String("No Writer for Logging Handler")
 	}
 	if h.buf != nil {
-		h.bw = util.NewBufWriter(h.w, h.buf)
+		h.bw = ioutil.NewBufWriter(h.w, h.buf)
 		h.w = h.bw
 	}
 
 	// if h.fname == "" {
 	// 	if h.buf != nil {
-	// 		h.bw = util.NewBufWriter(h.w, h.buf)
+	// 		h.bw = ioutil.NewBufWriter(h.w, h.buf)
 	// 	}
 	// } else {
 	// 	if err = h.openFile(); err != nil {
@@ -122,11 +125,11 @@ func (h *baseHandlerWriter) Close() (err error) {
 		return
 	}
 	if h.f != nil {
-		err = zerror.Multi([]error{err, h.f.Close()}).NonNilError()
+		err = errorutil.Multi([]error{err, h.f.Close()}).NonNilError()
 	}
 	h.w = nil
 	// if v, ok := h.f.(io.Closer); ok {
-	// 	err = zerror.Multi([]error{err, v.Close()}).NonNil()
+	// 	err = errorutil.Multi([]error{err, v.Close()}).NonNil()
 	// }
 	h.closed = 1
 	return
@@ -141,11 +144,11 @@ func (h *baseHandlerWriter) Close() (err error) {
 // 		return
 // 	}
 // 	if h.f != nil {
-// 		err = zerror.Multi([]error{err, h.f.Close()}).NonNil()
+// 		err = errorutil.Multi([]error{err, h.f.Close()}).NonNil()
 // 	}
 // 	h.w = nil
 // 	// if v, ok := h.f.(io.Closer); ok {
-// 	// 	err = zerror.Multi([]error{err, v.Close()}).NonNil()
+// 	// 	err = errorutil.Multi([]error{err, v.Close()}).NonNil()
 // 	// }
 // 	return
 // }
@@ -166,7 +169,7 @@ func (h *baseHandlerWriter) flush(lock bool) (err error) {
 // If the ctx is a HasHostRequestId or HasId, it writes information about the context.
 func (h *baseHandlerWriter) Handle(ctx interface{}, r Record) (err error) {
 	// Handle is on the fast path, so use fine-grained locking, and atomic functions if possible
-	defer zerror.OnErrorf(1, &err, nil)
+	defer errorutil.OnErrorf(1, &err, nil)
 	if atomic.LoadUint32(&h.closed) == 1 {
 		return ClosedErr
 	}
@@ -220,7 +223,7 @@ func (h *baseHandlerWriter) Handle(ctx interface{}, r Record) (err error) {
 			if err == nil {
 				err = err2
 			} else {
-				err = zerror.Multi([]error{err, err2})
+				err = errorutil.Multi([]error{err, err2})
 			}
 		}
 	}

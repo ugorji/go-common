@@ -11,6 +11,8 @@ go get github.com/ugorji/go-common/simpleblobstore
 # Package Documentation
 
 
+Package simpleblobstore provides simple blob storage.
+
 ## Exported Package API
 
 ```go

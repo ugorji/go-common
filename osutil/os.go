@@ -1,4 +1,4 @@
-package util
+package osutil
 
 import (
 	"errors"
@@ -10,7 +10,7 @@ import (
 	"runtime"
 )
 
-var ErrNotDir = errors.New("not a directory")
+var errNotDir = errors.New("not a directory")
 
 // Mkdir creates a directory.
 func MkDir(dir string) (err error) {
@@ -21,7 +21,7 @@ func MkDir(dir string) (err error) {
 		}
 	} else {
 		if !fi.Mode().IsDir() {
-			err = ErrNotDir
+			err = errNotDir
 		}
 	}
 	return
@@ -37,7 +37,7 @@ func ChkDir(dir string) (exists, isDir bool, err error) {
 		err = os.ErrNotExist
 	case !fi.Mode().IsDir():
 		exists = true
-		err = ErrNotDir
+		err = errNotDir
 	default:
 		exists, isDir = true, true
 	}
@@ -53,11 +53,7 @@ func AbsPath(path string) (abspath string, err error) {
 }
 
 func CopyFile(dest, src string, createDirs bool) (err error) {
-	var infile, outfile *os.File
-	if infile, err = os.Open(src); err != nil {
-		return
-	}
-	defer infile.Close()
+	var outfile *os.File
 	if createDirs {
 		if err = os.MkdirAll(filepath.Dir(dest), os.ModePerm); err != nil {
 			return
@@ -67,10 +63,7 @@ func CopyFile(dest, src string, createDirs bool) (err error) {
 		return
 	}
 	defer outfile.Close()
-	if _, err = io.Copy(outfile, infile); err != nil {
-		return
-	}
-	return
+	return CopyFileToWriter(outfile, src)
 }
 
 func CopyFileToWriter(dest io.Writer, src string) (err error) {

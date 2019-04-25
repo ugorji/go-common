@@ -1,37 +1,9 @@
-package util
+package runtimeutil
 
 import (
-	"errors"
-	"fmt"
 	"runtime"
 	"strings"
 )
-
-const (
-	debugging = true
-)
-
-func ValueToErr(panicVal interface{}, err *error) {
-	switch xerr := panicVal.(type) {
-	case nil:
-	case error:
-		*err = xerr
-	case string:
-		*err = errors.New(xerr)
-	default:
-		*err = fmt.Errorf("%v", panicVal)
-	}
-	return
-}
-
-func Debugf(format string, args ...interface{}) {
-	if debugging {
-		if len(format) == 0 || format[len(format)-1] != '\n' {
-			format = format + "\n"
-		}
-		fmt.Printf(format, args...)
-	}
-}
 
 // DebugLineInfo will return the line information.
 // Examples:
