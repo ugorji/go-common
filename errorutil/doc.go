@@ -2,11 +2,12 @@
 Package errorutil contains functions and types for error management.
 
 In general, idiomatic error handling in go follows the following principles:
+
   - Panic for exceptional conditions. These include:
-    Unexpected/invalid input parameters
+    Unexpected/invalid input parameters,
     ...
   - Return errors for expected conditions e.g.
-    file may not exist
+    file may not exist,
     network may be down
 
 To be explicit, do not return errors for invalid inputs. Instead, check the inputs
@@ -43,5 +44,10 @@ In general, follow these rules when generating errors:
   - When propagating an error, always propagate a new error appropriately (do not "blindly" throw errors).
   - Errors should be infrequent, so it is ok to determine whether to include
     "context" information when creating errors. I always do.
+
+This package just provides some helpers for this principle above
+  - Wrapper that exposes its wrapped error when Unwrap is called.
+    We did this so it would be aligned with go 1.13 xerrors package.
+
 */
 package errorutil

@@ -2,11 +2,14 @@ package errorutil
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/ugorji/go-common/runtimeutil"
 )
+
+type Wrapper interface {
+	Unwrap() error
+}
 
 //Multi is a slice of errors, which acts as a single error
 type Multi []error
@@ -37,6 +40,10 @@ type Rich struct {
 
 func (e *Rich) Error() (s string) {
 	return e.msg(true)
+}
+
+func (e *Rich) Unwrap() error {
+	return e.Cause
 }
 
 // func (e *Rich) Message() (s string) {
@@ -73,7 +80,7 @@ func (e *Rich) setContext(depth int8) {
 		return
 	}
 	x := Context{}
-	x.Subsystem, x.File, x.Line, x.FuncName = runtimeutil.DebugLineInfo(uint8(depth)+1, "")
+	x.Subsystem, x.FuncName, x.File, x.Line = runtimeutil.PkgFuncFileLine(uint8(depth) + 1)
 	e.Context = &x
 }
 
@@ -92,10 +99,11 @@ func NewRich(action string, cause error) *Rich {
 // If a *Err, it returns the base of its cause.
 // Else it returns the error passed.
 func Base(err error) error {
-	if err != nil {
-		if x, ok := err.(*Rich); ok && x.Cause != nil {
-			return Base(x.Cause)
-		}
+	if err == nil {
+		return err
+	}
+	if x, ok := err.(Wrapper); ok {
+		return Base(x.Unwrap())
 	}
 	return err
 }
@@ -177,38 +185,30 @@ func (x *Context) String() string {
 // 	return merrs
 // }
 
-// OnErrorf is called to enhance the error passed.
-// If the passed in error is nil, do nothing.
-// Else Wrap it with context information.
+// OnError is called to enhance the error passed.
+// If the passed in error is not nil, wrap it with context information.
+//
 // Most callers use it from defer functions.
-func OnErrorf(calldepth int8, err *error, msgAndParams ...interface{}) {
+//
+// IMPORTANT: Call this directly from the call site for which you
+// want to see the file/line context.
+func OnError(err *error) {
 	if *err == nil {
 		return
 	}
-	var message string
-	switch {
-	case len(msgAndParams) == 0,
-		len(msgAndParams) == 1 && msgAndParams[0] == nil:
-	default:
-		message, _ = msgAndParams[0].(string)
-		switch {
-		case message == "":
-			message = fmt.Sprint(msgAndParams...)
-		case len(msgAndParams) > 1:
-			switch {
-			case strings.IndexByte(message, '%') == -1:
-				message = fmt.Sprint(msgAndParams...)
-			default:
-				message = fmt.Sprintf(message, msgAndParams[1:]...)
-			}
-		}
+	*err = newRich("", *err, 3)
+}
+
+// OnErrorf is called to enhance the error passed.
+// Similar to OnError but includes a custom message.
+func OnErrorf(err *error, message string, params ...interface{}) {
+	if *err == nil {
+		return
 	}
-	if calldepth >= 0 {
-		calldepth++
+	if len(params) > 0 {
+		message = fmt.Sprintf(message, params...)
 	}
-	// err1 := New(message, *err, calldepth)
-	var err1 error = newRich(message, *err, calldepth+1)
-	*err = err1
+	*err = newRich(message, *err, 3)
 }
 
 // func OnErrorf(calldepth int8, err *error, msg interface{}, parameters ...interface{}) {

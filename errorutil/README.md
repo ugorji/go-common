@@ -16,10 +16,10 @@ Package errorutil contains functions and types for error management.
 In general, idiomatic error handling in go follows the following principles:
 
   - Panic for exceptional conditions. These include:
-    Unexpected/invalid input parameters
+    Unexpected/invalid input parameters,
     ...
   - Return errors for expected conditions e.g.
-    file may not exist
+    file may not exist,
     network may be down
 
 To be explicit, do not return errors for invalid inputs. Instead, check the
@@ -69,14 +69,21 @@ In general, follow these rules when generating errors:
   - Errors should be infrequent, so it is ok to determine whether to include
     "context" information when creating errors. I always do.
 
+## This package just provides some helpers for this principle above
+
+  - Wrapper that exposes its wrapped error when Unwrap is called.
+    We did this so it would be aligned with go 1.13 xerrors package.
+
 ## Exported Package API
 
 ```go
 func Base(err error) error
-func OnErrorf(calldepth int8, err *error, msgAndParams ...interface{})
+func OnError(err *error)
+func OnErrorf(err *error, message string, params ...interface{})
 type Context struct{ ... }
 type Multi []error
 type Rich struct{ ... }
     func NewRich(action string, cause error) *Rich
 type String string
+type Wrapper interface{ ... }
 ```
