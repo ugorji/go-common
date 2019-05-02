@@ -139,7 +139,7 @@ func (bs blobKeyBytes) BlobId() uint64 {
 }
 
 func (w nblobw) Finish() (key string, err error) {
-	defer errorutil.OnErrorf(1, &err, nil)
+	defer errorutil.OnError(&err)
 	if err = w.Close(); err != nil {
 		return
 	}
@@ -166,7 +166,7 @@ func (w nblobw) Finish() (key string, err error) {
 
 func (l BlobDriver) BlobWriter(ctx app.Context, contentType string,
 ) (b app.BlobWriter, err error) {
-	defer errorutil.OnErrorf(1, &err, nil)
+	defer errorutil.OnError(&err)
 	bi := &app.BlobInfo{
 		ContentType:  contentType,
 		CreationTime: time.Now(),
@@ -183,7 +183,7 @@ func (l BlobDriver) BlobWriter(ctx app.Context, contentType string,
 }
 
 func (l BlobDriver) BlobReader(ctx app.Context, key string) (br app.BlobReader, err error) {
-	defer errorutil.OnErrorf(1, &err, nil)
+	defer errorutil.OnError(&err)
 	reldir, blobf := blobKeyString(key).Location(l.Dir)
 	f, err := os.Open(filepath.Join(reldir, blobf))
 	if err != nil {
@@ -194,7 +194,7 @@ func (l BlobDriver) BlobReader(ctx app.Context, key string) (br app.BlobReader, 
 }
 
 func (l BlobDriver) BlobInfo(ctx app.Context, key string) (bi *app.BlobInfo, err error) {
-	defer errorutil.OnErrorf(1, &err, nil)
+	defer errorutil.OnError(&err)
 	bs, err := blobKeyString(key).Bytes()
 	if err != nil {
 		return
@@ -207,7 +207,7 @@ func (l BlobDriver) BlobInfo(ctx app.Context, key string) (bi *app.BlobInfo, err
 
 func (l BlobDriver) BlobServe(c app.Context, key string,
 	response http.ResponseWriter) (err error) {
-	defer errorutil.OnErrorf(1, &err, nil)
+	defer errorutil.OnError(&err)
 	f, err := os.Open(filepath.Join(l.Dir, key))
 	if err != nil {
 		return

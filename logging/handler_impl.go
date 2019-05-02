@@ -169,7 +169,7 @@ func (h *baseHandlerWriter) flush(lock bool) (err error) {
 // If the ctx is a HasHostRequestId or HasId, it writes information about the context.
 func (h *baseHandlerWriter) Handle(ctx interface{}, r Record) (err error) {
 	// Handle is on the fast path, so use fine-grained locking, and atomic functions if possible
-	defer errorutil.OnErrorf(1, &err, nil)
+	defer errorutil.OnError(&err)
 	if atomic.LoadUint32(&h.closed) == 1 {
 		return ClosedErr
 	}

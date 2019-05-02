@@ -289,7 +289,7 @@ func FilterByLevel(level Level) FilterFunc {
 
 func logR(calldepth uint8, ctx interface{}, level Level, message string, params ...interface{},
 ) (err error) {
-	defer errorutil.OnErrorf(1, &err, nil)
+	defer errorutil.OnError(&err)
 	if message == "" {
 		err = EmptyMessageErr
 		return
@@ -319,7 +319,7 @@ func logR(calldepth uint8, ctx interface{}, level Level, message string, params 
 			r.Level = level
 			if level >= PopulatePCLevel && calldepth >= 0 {
 				var xpline int
-				r.Target, r.ProgramFile, xpline, r.ProgramFunc = runtimeutil.DebugLineInfo(calldepth+1, "?")
+				r.Target, r.ProgramFunc, r.ProgramFile, xpline = runtimeutil.PkgFuncFileLine(calldepth + 1)
 				r.ProgramLine = uint16(xpline)
 				//call Accept again, since we now know the target.
 				if ok, ferr = l.Filter.Accept(ctx, r.Target, level); ferr != nil {
