@@ -13,9 +13,15 @@ go get github.com/ugorji/go-common/runtimeutil
 
 Package runtimeutil provides runtime utilities.
 
+Some functions are only available if debugging is enabled. Enable debugging
+by adding "ugorji=1" to the GODEBUG environmental variable.
+
 ## Exported Package API
 
 ```go
-func DebugLineInfo(calldepth uint8, unsetVal string) (subsystem, file string, line int, func0 string)
+func Debug() bool
+func FileLine(calldepth uint8) (func0, file string, line int)
+func FuncFileLine(calldepth uint8) (func0, file string, line int)
+func PkgFuncFileLine(calldepth uint8) (subsystem, func0, file string, line int)
 func Stack(bs []byte, all bool) []byte
 ```
