@@ -101,20 +101,25 @@ func NewBufWriter(w io.Writer, b []byte) (bw *BufWriter) {
 }
 
 func (b *BufWriter) Flush() (err error) {
+	// runtimeutil.P("%p: starting ...", b)
 	var i, w int = 0, 0
 	for w != b.n {
+		// runtimeutil.P("%p: w: %d, b.n: %d", b, w, b.n)
 		i, err = b.W.Write(b.buf[w:b.n])
 		w += i
+		// runtimeutil.P("%p: i: %d, w: %d, b.n: %d, err: %v", b, i, w, b.n, err)
 		if err != nil {
 			if w != 0 {
 				//slide (writing starts from b.n, and available from 0)
 				copy(b.buf, b.buf[w:b.n])
 				b.n -= w
 			}
+			// runtimeutil.P("%p: done with err: %v", b, err)
 			return
 		}
 	}
 	b.n = 0
+	// runtimeutil.P("%p: done", b)
 	return
 }
 
