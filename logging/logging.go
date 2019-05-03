@@ -6,18 +6,10 @@ package logging
    regard for the error return value.
 */
 
-/*
- TODO:
-   - Consider removing all those hooks to HasId, HasHostRequestId, etc
-*/
-
 import (
-	"bytes"
+	"context"
 	"fmt"
-	"io"
 	"os"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,79 +18,83 @@ import (
 	"github.com/ugorji/go-common/runtimeutil"
 )
 
-// Level is an int representing the log levels. It typically ranges from
-// ALL (100) to OFF (107).
-type Level uint8
-
-const (
-	ALL Level = 100 + iota
-	TRACE
-	DEBUG
-	INFO
-	WARNING
-	ERROR
-	SEVERE
-	OFF
-)
-
 // pkgArgs allows us put all args together, to prevent bugs.
 // other code was using mu, not realizing it was a pkg variable.
-type pkgArgs struct {
+var y = struct {
 	calldepthDelta uint8
+	once           sync.Once
 	mu             sync.RWMutex
 	//lmu sync.Mutex
-	seq            uint32
-	loggers        map[string]logger
-	asyncChan      chan asyncLoggable
-	closeAsyncChan chan struct{}
-	closed         bool
+
+	flush  time.Duration
+	buffer uint16 // size of buffer
+
+	seq uint32
+
+	// defHandler       Handler
+	tick *time.Ticker
+	// noopLogger *Logger
+	loggers  map[string]*Logger
+	handlers map[string]Handler
+	// handlerFactories map[string]HandlerFactory
+	// sealed       bool   // once sealed, the system cannot add any more handlers or modify them.
+	closed          bool   // once closed, no logging can happen again
+	closedUint32    uint32 // closed = 1, open = 0 // mirror of closed, for atomic access
+	populatePCLevel Level  // PopulatePCLevel is threshold up to which we log file/line information
+}{
+	closed:         true, // starts closed
+	closedUint32:   1,
+	calldepthDelta: 2, // TODO: what is the appropriate value here? test it.
+	handlers:       make(map[string]Handler),
+	loggers:        make(map[string]*Logger),
+	// handlerFactories: make(map[string]HandlerFactory),
+	flush:           5 * time.Second,
+	populatePCLevel: WARNING,
+	// noopLogger: &Logger{},
 }
 
-var y = pkgArgs{
-	calldepthDelta: 2,
-	loggers:        make(map[string]logger),
-	asyncChan:      make(chan asyncLoggable, 1<<12), //4096
-	closeAsyncChan: make(chan struct{}),
-}
+// ErrorContextKey is the context.Context key used to store an error
+var ErrorContextKey = new(int)
+
+// AppContextKey is the context.Context key used to store an app.Context
+var AppContextKey = new(int)
 
 var (
-	PopulatePCLevel = TRACE
-	EmptyMessageErr = errorutil.String("logging: Empty Message")
-	ClosedErr       = errorutil.String("logging: closed")
+	FilterRejectedErr     = errorutil.String("logging: log level lower than logger threshold")
+	EmptyMessageErr       = errorutil.String("logging: empty message")
+	NoWriterForHandlerErr = errorutil.String("logging: no writer for handler")
+
+	// ClosedErr is returned if we try to do something when logging is closed.
+	// TODO: use this across the board (sometimes we return nil wrongly)
+	ClosedErr = errorutil.String("logging: closed")
 )
 
-func init() {
-	// Server is started opened, with no loggers configured by default.
-	// We don't setup default logger on stderr, because user may want to use stderr for something else.
-	// asyncloop must be running in opened mode. Co-ordinate with openLoggers() function.
-	go asyncLoop()
-}
+type Format uint8
 
-type Opener interface {
-	Open() error
-}
+const (
+	Human Format = 2 + iota
+	CSV
+	JSON
+)
 
-type HasId interface {
+type hasId interface {
 	Id() string
 }
 
-type HasHostRequestId interface {
-	HostId() string
-	RequestId() string
-}
-
-type Detachable interface {
-	Detach() interface{}
+type backtrace struct {
+	File string
+	Line uint16
 }
 
 // logging package has a list of loggers. For each Log Record, it passes it to
 // all the loggers in the list. If a logger accepts it (via Filter), then it's
 // Handler is called to handle the record (it persist it).
-type logger struct {
-	//Name    string
-	Filter  Filter
-	Handler Handler
-	Async   bool
+type Logger struct {
+	name         string
+	minLevel     Level
+	backtraces   []backtrace
+	handlerNames []string
+	handlers     []Handler
 }
 
 type Record struct {
@@ -110,132 +106,79 @@ type Record struct {
 	ProgramFunc  string
 	Message      string
 	TimeUnixNano int64 //nano seconds since unix epoch
-	Seq          uint32
-	ProgramLine  uint16
-	Level        Level
+	// Seq          uint32 // sequence number has to be a property of the Handle
+	ProgramLine uint16
+	Level       Level
 }
 
-type asyncLoggable struct {
-	ctx interface{}
-	r   Record
-	h   Handler
+type Formatter interface {
+	Format(ctx context.Context, r Record, seqId string) string
 }
 
 // Noop Handler and Filter.
 type Noop struct{}
 
-func (n Noop) Handle(ctx interface{}, r Record) error                           { return nil }
-func (n Noop) Accept(ctx interface{}, target string, level Level) (bool, error) { return false, nil }
+func (n Noop) Handle(ctx context.Context, r Record) error { return nil }
+func (n Noop) Accept(ctx context.Context, r Record) error { return nil }
+
+// type HandlerFactory func(f Filter, flush time.Duration, buf []byte, properties map[string]interface{}) (Handler, error)
 
 type Handler interface {
-	Handle(ctx interface{}, r Record) error
+	// Name() string
+	Handle(ctx context.Context, r Record) error
+	Filter() Filter
+	Flush() error
+	Close() error
+	Open(buffer uint16) error
 }
 
 type Filter interface {
-	Accept(ctx interface{}, target string, level Level) (bool, error)
+	Accept(ctx context.Context, r Record) error
 }
 
-type HandlerFunc func(ctx interface{}, r Record) error
+type FilterFunc func(ctx context.Context, r Record) error
 
-type FilterFunc func(ctx interface{}, target string, level Level) (bool, error)
+func (f FilterFunc) Accept(ctx context.Context, r Record) error { return f(ctx, r) }
 
-func (f HandlerFunc) Handle(ctx interface{}, r Record) error {
-	return f(ctx, r)
-}
+type HandlerFunc func(ctx context.Context, r Record) error
 
-func (f FilterFunc) Accept(ctx interface{}, target string, level Level) (bool, error) {
-	return f(ctx, target, level)
-}
+func (f HandlerFunc) Handle(ctx context.Context, r Record) error { return f(ctx, r) }
+func (f HandlerFunc) Filter() Filter                             { return nil }
+func (f HandlerFunc) Flush() error                               { return nil }
+func (f HandlerFunc) Close() error                               { return nil }
+func (f HandlerFunc) Open(buffer uint16) error                   { return nil }
 
-func ParseLevel(s string) (l Level) {
-	switch s {
-	case "ALL":
-		l = ALL
-	case "TRACE":
-		l = TRACE
-	case "DEBUG":
-		l = DEBUG
-	case "INFO":
-		l = INFO
-	case "WARNING":
-		l = WARNING
-	case "ERROR":
-		l = ERROR
-	case "SEVERE":
-		l = SEVERE
-	case "OFF", "":
-		l = OFF
-	default:
-		i := strings.Index(s, ":")
-		if i != -1 {
-			s = s[:i]
-		}
-		if i, err := strconv.ParseUint(s, 10, 32); err == nil {
-			l = Level(uint32(i))
-		} else {
-			l = OFF
-		}
+// func existingLogger(name string) (l *Logger, closed, sealed bool) {
+// 	y.mu.RLock()
+// 	if y.sealed {
+// 		sealed = true
+// 	}
+// 	if y.closed {
+// 		closed = true
+// 		y.mu.RUnlock()
+// 		return
+// 	}
+// 	l = y.loggers[name]
+// 	y.mu.RUnlock()
+// 	return
+// }
+
+func AddHandler(name string, f Handler) (err error) {
+	y.mu.Lock()
+	defer y.mu.Unlock()
+	// if y.closed { // || y.sealed {
+	// 	return
+	// }
+	if _, ok := y.handlers[name]; ok {
+		// delete(y.handlers, name)
+		return
+	}
+	y.handlers[name] = f
+	if !y.closed {
+		err = f.Open(y.buffer)
 	}
 	return
-}
-
-func (l Level) String() (s string) {
-	switch l {
-	case ALL:
-		s = "ALL"
-	case TRACE:
-		s = "TRACE"
-	case DEBUG:
-		s = "DEBUG"
-	case INFO:
-		s = "INFO"
-	case WARNING:
-		s = "WARNING"
-	case ERROR:
-		s = "ERROR"
-	case SEVERE:
-		s = "SEVERE"
-	case OFF:
-		s = "OFF"
-	default:
-		s = strconv.Itoa(int(l)) + ":Log_Level"
-	}
-	return
-}
-
-func (l Level) ShortString() (s string) {
-	switch l {
-	case ALL:
-		s = "A"
-	case TRACE:
-		s = "T"
-	case DEBUG:
-		s = "D"
-	case INFO:
-		s = "I"
-	case WARNING:
-		s = "W"
-	case ERROR:
-		s = "E"
-	case SEVERE:
-		s = "S"
-	case OFF:
-		s = "O"
-	default:
-		s = strconv.Itoa(int(l))
-	}
-	return
-}
-
-func asyncLoop() {
-	for {
-		select {
-		case x := <-y.asyncChan:
-			x.h.Handle(x.ctx, x.r)
-		case <-y.closeAsyncChan:
-			return
-		}
-	}
+	// y.handlerFactories[name] = f
 }
 
 // AddLogger will add/replace/delete a new logger to the set.
@@ -243,60 +186,221 @@ func asyncLoop() {
 // and then adds a new logger if filter and handler are non-nil.
 // When removing a logger, it tries to call h.Close().
 // When adding a logger, it tries to call h.Open().
-func AddLogger(name string, f Filter, h Handler, async bool) (err error) {
+func AddLogger(name string, minLevel Level, backtraces []backtrace, handlerNames []string) (l *Logger) {
+	y.mu.RLock()
+	// if y.closed {
+	// 	// l = y.noopLogger
+	// } else {
+	// 	l = y.loggers[name]
+	// }
+	l = y.loggers[name]
+	y.mu.RUnlock()
+	if l != nil {
+		return l
+	}
 	y.mu.Lock()
 	defer y.mu.Unlock()
-	// don't allow outside users call AddLogger if logging is closed.
-	if y.closed {
-		return
+	l = &Logger{name: name}
+	l.backtraces = backtraces
+	b := baseLogger()
+	if minLevel == INVALID {
+		minLevel = b.minLevel
 	}
-	return addLogger(name, f, h, async)
-}
-
-func addLogger(name string, f Filter, h Handler, async bool) (err error) {
-	if l, ok := y.loggers[name]; ok {
-		if lo, ok2 := l.Handler.(io.Closer); ok2 {
-			if err = lo.Close(); err != nil {
-				return
+	// minLevel = 0 // test that all debug messages go through
+	l.minLevel = minLevel
+	if handlerNames == nil {
+		l.handlerNames = b.handlerNames
+		l.handlers = b.handlers
+	} else {
+		l.handlerNames = handlerNames
+		l.handlers = make([]Handler, 0, 8)
+		for _, n := range handlerNames {
+			if hh, ok := y.handlers[n]; ok {
+				l.handlers = append(l.handlers, hh)
 			}
 		}
-		delete(y.loggers, name)
 	}
-	if h == nil || f == nil {
-		return
-	}
-	if h != nil && f != nil {
-		if lo, ok := h.(Opener); ok {
-			if err = lo.Open(); err != nil {
-				return
-			}
-		}
-		y.loggers[name] = logger{Filter: f, Handler: h, Async: async}
-	}
+	y.loggers[name] = l
+	runtimeutil.P("AddLogger: logger with name: %s and handlers: %v", name, l.handlerNames)
 	return
 }
 
-func FilterByLevel(level Level) FilterFunc {
-	x := func(_ interface{}, _ string, rLevel Level) (bool, error) {
-		if rLevel < level {
-			s := "The log record level: %v, is lower than the logger threshold: %v"
-			return false, fmt.Errorf(s, rLevel, level)
+// this function is only called by AddLogger, within a lock
+func baseLogger() (l *Logger) {
+	// this is the logger attached to a blank name.
+	// if none found, make a new one
+	l = y.loggers[""]
+	if l != nil {
+		return
+	}
+	l = &Logger{minLevel: INFO}
+	var addIt = func(n string, hh Handler) *Logger {
+		l.handlerNames = []string{n}
+		l.handlers = []Handler{hh}
+		y.loggers[""] = l
+		return l
+	}
+	// if only one handler, use it.
+	// else look for the handler that writes to an io.Writer which is stderr, with human formatter
+	// else initialize it to that one, with the name ""
+	if hh := y.handlers[""]; hh != nil {
+		return addIt("", hh)
+	}
+	switch len(y.handlers) {
+	case 0:
+	case 1:
+		for n, hh := range y.handlers {
+			return addIt(n, hh)
 		}
-		return true, nil
+	default:
+		for n, hh := range y.handlers {
+			// look for the handler that writes to an io.Writer which is stderr, with human formatter
+			if w, ok := hh.(*baseHandlerWriter); ok && w.w0 == os.Stderr && w.fmt == Human {
+				return addIt(n, hh)
+			}
+		}
+	}
+	// create new one
+	n := "<stderr>"
+	hh := NewHandlerWriter(os.Stderr, n, Human, nil)
+	if err := hh.Open(y.buffer); err != nil {
+		runtimeutil.P("error getting baseLogger: %v", err)
+		panic(err)
+	}
+	return addIt(n, hh)
+}
+
+func isClosed() bool {
+	return atomic.LoadUint32(&y.closedUint32) == 1
+}
+
+func PkgLogger() *Logger {
+	subsystem, _, _, _ := runtimeutil.PkgFuncFileLine(2)
+	return AddLogger(subsystem, 0, nil, nil)
+}
+
+func NamedLogger(name string) *Logger {
+	return AddLogger(name, 0, nil, nil)
+}
+
+func FilterByLevel(level Level) FilterFunc {
+	x := func(_ context.Context, r Record) error {
+		if r.Level < level {
+			// s := "The log record level: %v, is lower than the logger threshold: %v"
+			// return fmt.Errorf(s, r.Level, level)
+			return FilterRejectedErr
+		}
+		return nil
 	}
 	return x
 }
 
-func logR(calldepth uint8, ctx interface{}, level Level, message string, params ...interface{},
+func Open(flush time.Duration, buffer uint16, populatePC Level) error {
+	y.mu.Lock()
+	defer y.mu.Unlock()
+	if !y.closed {
+		return nil
+	}
+
+	y.flush = flush
+	y.buffer = buffer
+	if populatePC == INVALID {
+		populatePC = WARNING
+	}
+	y.populatePCLevel = populatePC
+
+	var merrs []error
+	f2 := func(h Handler) error { return h.Open(buffer) }
+	if err := runAllHandlers(f2); err != nil {
+		merrs = append(merrs, err)
+	}
+
+	y.tick = time.NewTicker(y.flush)
+	go func() {
+		for range y.tick.C {
+			Flush()
+		}
+	}()
+	y.closed = false
+	y.closedUint32 = 0
+	return merr(merrs)
+}
+
+// runAllHandlers runs a function on each Handler.
+// It does not hold onto the locks - so acquire locks if needed.
+func runAllHandlers(f func(h Handler) error) error {
+	var merrs []error
+	for _, h := range y.handlers {
+		if err := f(h); err != nil {
+			merrs = append(merrs, err)
+		}
+	}
+	return merr(merrs)
+}
+
+func Close() error {
+	y.mu.Lock()
+	defer y.mu.Unlock()
+	if y.closed {
+		return nil
+	}
+	y.closed = true
+	y.closedUint32 = 1
+	y.tick.Stop()
+	f := func(h Handler) error { return h.Close() }
+	return runAllHandlers(f)
+}
+
+func Flush() error {
+	f := func(h Handler) error { return h.Flush() }
+	y.mu.Lock()
+	defer y.mu.Unlock()
+	if y.closed {
+		return nil
+	}
+	return runAllHandlers(f)
+}
+
+func Reopen() error {
+	var merrs []error
+	if err := Close(); err != nil {
+		merrs = append(merrs, err)
+	}
+	if err := Open(y.flush, y.buffer, y.populatePCLevel); err != nil {
+		merrs = append(merrs, err)
+	}
+	return merr(merrs)
+
+}
+
+func merr(merrs []error) error {
+	if len(merrs) > 0 {
+		return errorutil.Multi(merrs)
+	}
+	return nil
+}
+
+// func flushLoop() {
+// }
+
+func (l *Logger) logR(calldepth uint8, level Level, ctx context.Context, message string, params ...interface{},
 ) (err error) {
+	// runtimeutil.P("logR called for level: %s, message: %s", level2s[level], message)
+	if l == nil || level < l.minLevel {
+		return
+	}
+	// runtimeutil.P("logR l==nil: %v, %s", level2s[level], message)
+	if isClosed() {
+		return
+	}
+	// defer func() { runtimeutil.P("logR error: %v", err) }()
+
 	defer errorutil.OnError(&err)
 	if message == "" {
 		err = EmptyMessageErr
 		return
 	}
-	y.mu.RLock()
-	defer y.mu.RUnlock()
-	if y.closed {
+	if isClosed() {
 		return ClosedErr
 	}
 	var r Record
@@ -304,34 +408,22 @@ func logR(calldepth uint8, ctx interface{}, level Level, message string, params 
 	// No need for lock/unlock here, since handler/filter must ensure it is parallel-safe
 	// y.lmu.Lock()
 	// defer y.lmu.Unlock()
-	for _, l := range y.loggers {
-		ok, ferr := l.Filter.Accept(ctx, r.Target, level)
-		if ferr != nil {
-			merrs = append(merrs, ferr)
-			continue
-		} else if !ok {
+
+	for _, h := range y.handlers {
+		if ff := h.Filter(); ff != nil && ff.Accept(ctx, r) != nil {
 			continue
 		}
-		//fill out record in 2 steps:
-		//- fill out Level and PC info, then call Accept again.
-		//- fill out Seq, time and Message (only if this r will be logged)
-		if r.Level == 0 {
+
+		if r.Message == "" {
 			r.Level = level
-			if level >= PopulatePCLevel && calldepth >= 0 {
+			if level >= y.populatePCLevel && calldepth >= 0 {
 				var xpline int
 				r.Target, r.ProgramFunc, r.ProgramFile, xpline = runtimeutil.PkgFuncFileLine(calldepth + 1)
 				r.ProgramLine = uint16(xpline)
-				//call Accept again, since we now know the target.
-				if ok, ferr = l.Filter.Accept(ctx, r.Target, level); ferr != nil {
-					merrs = append(merrs, ferr)
-					continue
-				} else if !ok {
-					continue
-				}
 			}
-		}
-		if r.Seq == 0 {
-			r.Seq = atomic.AddUint32(&y.seq, 1)
+			// }
+			// if r.Seq == 0 {
+			// 	r.Seq = atomic.AddUint32(&y.seq, 1)
 			r.TimeUnixNano = time.Now().UnixNano()
 			// Testing. Remove.
 			// fmt.Printf("====> Params: len: %d\n", len(params))
@@ -342,155 +434,138 @@ func logR(calldepth uint8, ctx interface{}, level Level, message string, params 
 				r.Message = fmt.Sprintf(message, params...)
 			}
 		}
-		if l.Async {
-			if de, ok := ctx.(Detachable); ok {
-				dctx := de.Detach()
-				y.asyncChan <- asyncLoggable{dctx, r, l.Handler}
-				continue
-			}
-		}
-		// No need for lock/unlock here, since handler must ensure it is parallel-safe
-		// func() {
-		// y.lmu.Lock()
-		// defer y.lmu.Unlock()
-		if herr := l.Handler.Handle(ctx, r); herr != nil {
+		if herr := h.Handle(ctx, r); herr != nil {
 			merrs = append(merrs, herr)
 		}
 		// }()
 	}
-	if len(merrs) > 0 {
-		err = errorutil.Multi(merrs)
-	}
-	return
+	return merr(merrs)
 }
 
 // Log is the all-encompassing function that can be used by
 // helper log functions in packages without losing caller positon.
 //
+// A nil *Logger does nothing - equivalent to a no-op.
+//
 // Example:
 //    func logT(message string, params ...interface{}) {
 //      logging.Log(nil, 1, level.TRACE, message, params...)
 //    }
-func Log(ctx interface{}, calldepth uint8, level Level, message string, params ...interface{}) error {
-	return logR(y.calldepthDelta+calldepth, ctx, level, message, params...)
+func (l *Logger) Log(ctx context.Context, calldepth uint8, level Level, message string, params ...interface{}) error {
+	return l.logR(y.calldepthDelta+calldepth, level, ctx, message, params...)
 }
 
-func Trace(ctx interface{}, message string, params ...interface{}) error {
-	return logR(y.calldepthDelta, ctx, TRACE, message, params...)
+// func (l *Logger) Trace(ctx context.Context, message string, params ...interface{}) error {
+// 	return l.logR(y.calldepthDelta, ctx, TRACE, message, params...)
+// }
+
+func (l *Logger) Debug(ctx context.Context, message string, params ...interface{}) error {
+	return l.logR(y.calldepthDelta, DEBUG, ctx, message, params...)
 }
 
-func Debug(ctx interface{}, message string, params ...interface{}) error {
-	return logR(y.calldepthDelta, ctx, DEBUG, message, params...)
+func (l *Logger) Info(ctx context.Context, message string, params ...interface{}) error {
+	return l.logR(y.calldepthDelta, INFO, ctx, message, params...)
 }
 
-func Info(ctx interface{}, message string, params ...interface{}) error {
-	return logR(y.calldepthDelta, ctx, INFO, message, params...)
+func (l *Logger) Warning(ctx context.Context, message string, params ...interface{}) error {
+	return l.logR(y.calldepthDelta, WARNING, ctx, message, params...)
 }
 
-func Warning(ctx interface{}, message string, params ...interface{}) error {
-	return logR(y.calldepthDelta, ctx, WARNING, message, params...)
+func (l *Logger) Error(ctx context.Context, message string, params ...interface{}) error {
+	return l.logR(y.calldepthDelta, ERROR, ctx, message, params...)
 }
 
-func Error(ctx interface{}, message string, params ...interface{}) error {
-	return logR(y.calldepthDelta, ctx, ERROR, message, params...)
-}
-
-// Error2 logs an error along with an associated message and possible Trace (if a errorutil.Tracer).
-// It is a no-op if err is nil.
-func Error2(ctx interface{}, err error, message string, params ...interface{}) error {
-	if err == nil {
-		return nil
-	}
-
-	var buf bytes.Buffer
-	fmt.Fprintf(&buf, message, params...)
-	buf.WriteString(" :: ")
-	buf.WriteString(err.Error())
-	// switch x := err.(type) {
-	// case errorutil.Tracer:
-	// 	x.ErrorTrace(&buf, "", "")
-	// default:
-	// 	buf.WriteString(err.Error())
-	// }
-	return logR(y.calldepthDelta, ctx, ERROR, string(buf.Bytes()))
-}
-
-func Severe(ctx interface{}, message string, params ...interface{}) error {
-	return logR(y.calldepthDelta, ctx, SEVERE, message, params...)
+func (l *Logger) Severe(ctx context.Context, message string, params ...interface{}) error {
+	return l.logR(y.calldepthDelta, SEVERE, ctx, message, params...)
 }
 
 // Always logs messages at the OFF level, so that it
 // always shows in the log (even if logging is turned off)
-func Always(ctx interface{}, message string, params ...interface{}) error {
-	return logR(y.calldepthDelta, ctx, OFF, message, params...)
+func (l *Logger) Always(ctx context.Context, message string, params ...interface{}) error {
+	return l.logR(y.calldepthDelta, ALWAYS, ctx, message, params...)
 }
 
-func waitForAsync() {
-	tdur, tmax := 1*time.Millisecond, 100*time.Millisecond
-	for len(y.asyncChan) != 0 {
-		if tdur < tmax {
-			tdur *= 2
-		}
-		time.Sleep(tdur)
-	}
-}
-
-func closeLoggers() error {
-	if y.closed {
+// Error2 logs an error along with an associated message and possible Trace (if a errorutil.Tracer).
+// It is a no-op if err is nil.
+func (l *Logger) Error2(ctx context.Context, err error, message string, params ...interface{}) error {
+	if err == nil {
 		return nil
 	}
-	waitForAsync()
-	y.closeAsyncChan <- struct{}{}
-	var merrs []error
-	for _, v := range y.loggers {
-		if v2, ok := v.Handler.(io.Closer); ok {
-			if err2 := v2.Close(); err2 != nil {
-				merrs = append(merrs, err2)
-			}
-		}
-		// delete(y.loggers, k)
-	}
-	y.closed = true
-	if len(merrs) > 0 {
-		return errorutil.Multi(merrs)
-	}
-	return nil
+	return l.logR(y.calldepthDelta, ERROR, context.WithValue(ctx, ErrorContextKey, err), message, params...)
+
+	// var buf bytes.Buffer
+	// fmt.Fprintf(&buf, message, params...)
+	// buf.WriteString(" :: ")
+	// buf.WriteString(err.Error())
+	// // switch x := err.(type) {
+	// // case errorutil.Tracer:
+	// // 	x.ErrorTrace(&buf, "", "")
+	// // default:
+	// // 	buf.WriteString(err.Error())
+	// // }
+	// return l.logR(y.calldepthDelta, ERROR, ctx, string(buf.Bytes()))
 }
 
-func openLoggers() error {
-	if !y.closed {
-		return nil
-	}
-	// waitForAsync()
-	var merrs []error
-	for _, v := range y.loggers {
-		if v2, ok := v.Handler.(Opener); ok {
-			if err2 := v2.Open(); err2 != nil {
-				merrs = append(merrs, err2)
-			}
-		}
-		// delete(y.loggers, k)
-	}
-	y.closed = false
-	go asyncLoop()
-	if len(merrs) > 0 {
-		return errorutil.Multi(merrs)
-	}
-	return nil
-}
+// func waitForAsync() {
+// 	tdur, tmax := 1*time.Millisecond, 100*time.Millisecond
+// 	for len(y.asyncChan) != 0 {
+// 		if tdur < tmax {
+// 			tdur *= 2
+// 		}
+// 		time.Sleep(tdur)
+// 	}
+// }
 
-func Reopen() error {
-	y.mu.Lock()
-	defer y.mu.Unlock()
-	// ensure you close and open errors back
-	return errorutil.Multi([]error{closeLoggers(), openLoggers()}).NonNilError()
-}
+// func closeLoggers() error {
+// 	if y.closed {
+// 		return nil
+// 	}
+// 	waitForAsync()
+// 	y.closeAsyncChan <- struct{}{}
+// 	var merrs []error
+// 	for _, v := range y.loggers {
+// 		if v2, ok := v.Handler.(io.Closer); ok {
+// 			if err2 := v2.Close(); err2 != nil {
+// 				merrs = append(merrs, err2)
+// 			}
+// 		}
+// 		// delete(y.loggers, k)
+// 	}
+// 	y.closed = true
+// 	if len(merrs) > 0 {
+// 		return errorutil.Multi(merrs)
+// 	}
+// 	return nil
+// }
 
-func Close() error {
-	y.mu.Lock()
-	defer y.mu.Unlock()
-	return closeLoggers()
-}
+// func openLoggers() error {
+// 	if !y.closed {
+// 		return nil
+// 	}
+// 	// waitForAsync()
+// 	var merrs []error
+// 	for _, v := range y.loggers {
+// 		if v2, ok := v.Handler.(Opener); ok {
+// 			if err2 := v2.Open(); err2 != nil {
+// 				merrs = append(merrs, err2)
+// 			}
+// 		}
+// 		// delete(y.loggers, k)
+// 	}
+// 	y.closed = false
+// 	go asyncLoop()
+// 	if len(merrs) > 0 {
+// 		return errorutil.Multi(merrs)
+// 	}
+// 	return nil
+// }
+
+// func Reopen() error {
+// 	y.mu.Lock()
+// 	defer y.mu.Unlock()
+// 	// ensure you close and open errors back
+// 	return errorutil.Multi([]error{closeLoggers(), openLoggers()}).NonNilError()
+// }
 
 // func Open() error {
 // 	y.mu.Lock()
@@ -498,48 +573,48 @@ func Close() error {
 // 	return openLoggers()
 // }
 
-// AddLoggers will add/replace/delete the handlers defined for files and writers specified.
-// (see doc for AddLogger).
-//
-// The files parameter can be one of:
-//   <stderr> : open up logging to stderr
-//   <stdout> : open up logging to stdout
-//   anything else : open up logging to that file
-func AddLoggers(files []string, writers map[string]io.Writer, minLevel Level,
-	bufsize int, flushInterval time.Duration, async bool) (err error) {
-	y.mu.Lock()
-	defer y.mu.Unlock()
-	if y.closed {
-		return
-	}
-	var loghdlr Handler
-	for _, logfile := range files {
-		if logfile == "" {
-			continue
-		}
-		//println("================== LOGFILE: ", logfile)
-		switch logfile {
-		case "<stderr>":
-			loghdlr = NewHandlerWriter(os.Stderr, "", make([]byte, bufsize), flushInterval)
-		case "<stdout>":
-			loghdlr = NewHandlerWriter(os.Stdout, "", make([]byte, bufsize), flushInterval)
-		default:
-			loghdlr = NewHandlerWriter(nil, logfile, make([]byte, bufsize), flushInterval)
-		}
-		//async logging much more performant. Under load, it just becomes a FIFO, which is okay.
-		//However, we do buffering now, which should eliminate the perf benefits of async.
-		if err = addLogger(logfile, FilterByLevel(minLevel), loghdlr, async); err != nil {
-			return
-		}
-	}
-	for n, w := range writers {
-		if w == nil {
-			continue
-		}
-		loghdlr = NewHandlerWriter(w, "", make([]byte, bufsize), flushInterval)
-		if err = addLogger(n, FilterByLevel(minLevel), loghdlr, async); err != nil {
-			return
-		}
-	}
-	return
-}
+// // AddLoggers will add/replace/delete the handlers defined for files and writers specified.
+// // (see doc for AddLogger).
+// //
+// // The files parameter can be one of:
+// //   <stderr> : open up logging to stderr
+// //   <stdout> : open up logging to stdout
+// //   anything else : open up logging to that file
+// func AddLoggers(files []string, writers map[string]io.Writer, minLevel Level,
+// 	bufsize int, flushInterval time.Duration, async bool) (err error) {
+// 	y.mu.Lock()
+// 	defer y.mu.Unlock()
+// 	if y.closed {
+// 		return
+// 	}
+// 	var loghdlr Handler
+// 	for _, logfile := range files {
+// 		if logfile == "" {
+// 			continue
+// 		}
+// 		//println("================== LOGFILE: ", logfile)
+// 		switch logfile {
+// 		case "<stderr>":
+// 			loghdlr = NewHandlerWriter(os.Stderr, "", make([]byte, bufsize), flushInterval)
+// 		case "<stdout>":
+// 			loghdlr = NewHandlerWriter(os.Stdout, "", make([]byte, bufsize), flushInterval)
+// 		default:
+// 			loghdlr = NewHandlerWriter(nil, logfile, make([]byte, bufsize), flushInterval)
+// 		}
+// 		//async logging much more performant. Under load, it just becomes a FIFO, which is okay.
+// 		//However, we do buffering now, which should eliminate the perf benefits of async.
+// 		if err = addLogger(logfile, FilterByLevel(minLevel), loghdlr, async); err != nil {
+// 			return
+// 		}
+// 	}
+// 	for n, w := range writers {
+// 		if w == nil {
+// 			continue
+// 		}
+// 		loghdlr = NewHandlerWriter(w, "", make([]byte, bufsize), flushInterval)
+// 		if err = addLogger(n, FilterByLevel(minLevel), loghdlr, async); err != nil {
+// 			return
+// 		}
+// 	}
+// 	return
+// }

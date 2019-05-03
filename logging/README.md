@@ -13,22 +13,45 @@ go get github.com/ugorji/go-common/logging
 
 Package logging provides a precise logging framework.
 
+
+## LogRecord
+
 A LogRecord can be sent by the application. It contains a level, message,
 timestamp, target (which subsystem the message came from) and PC information
 (file, line number).
 
+
+## Filter
+
 A Filter can determine whether a LogRecord should be accepted or not.
+
+
+## Handle
+
+A Handle can persist a LogRecord as it deems fit. Each Handle can have a
+(set of) Filters configured. The Handle will log a record iff all Filters
+accept it. The lifecycle of a Handle is: init, open, log OR flush ...,
+close.
+
+Multiple Handles can be configured on a running system.
+
+All Handles will write to an in-memory buffer which can typically hold up to
+20 log records. When the buffer cannot add another log record, it is
+flushed.
+
+Once a Handle has been created for a given name, it cannot be replaced.
+
+
+## Formatter
 
 A Formatter can take a LogRecord and convert it to a string for easy
 persisting.
 
-A Handle can persist a LogRecord as it deems fit. Each Handle can have a
-(set of) Filters configured. The Handle will log a record iff all Filters
-accept it. A Handle *may* have a Formatter determine how the LogRecord
-should be persisted. The lifecycle of a Handle is: init, log OR flush ...,
-close.
+A Handle *may* have a Formatter determine how the LogRecord should be
+persisted.
 
-Multiple Handles can be configured on a running system.
+
+## Logger
 
 A Logger can be retrieved for any subsystem (target). This can be retrieved
 explicitly by name or implicitly (where we use the package path to infer the
@@ -42,12 +65,16 @@ level defined, so it can bypass logging quickly.
 
 There is no hierachy of Loggers.
 
-Typical Usage:
+Once a Logger has been retrieved for a given subsystem, it cannot be
+replaced.
 
-```go
-    Logger log = logging.PkgLogger()
-    log.Info(ctx, formatString, params...)
-```
+
+## Flushing
+
+The framework has a timer that will flush each Handle when triggered.
+
+
+## Framework Initialization
 
 The logging framework is typically initialized by the running application ie
 early in its main method.
@@ -60,77 +87,95 @@ logging framework is initialized. If it was not initialized apriori, then it
 is initialized to have a single Handle that writes a single human readable
 line for each log record with minimum level of INFO.
 
-All Handles will write to an in-memory buffer which can typically hold up to
-20 log records. When the buffer cannot add another log record, it is
-flushed. Also, the framework has a timer that will flush each Handle when
-triggered.
+## A Handler factory is registered by passing in a function that takes
 
-On the backend, Loggers (encapsulation of filter and handler/writer) are
-registered to a name.
+  - Properties map[string]interface{}
+  - Filter ... (set of Filters)
 
-When a Record is created, it is dispatched to all registered Loggers. Each
-Logger will then publish the record if its filter accepts it.
+When a Logger is configured to use a handler, that handler is created and
+initialized lazily at first use.
 
-The easiest way to build a filter is off a Level. There's a convenience
-Filter for that.
-
-By default, a single logger is initialized bound by name "". It uses a
-built-in handler which writes a single line to the standard output stream.
-
-You can replace a logger by registering a non-nil handler and filter to the
-same name. You can remove a logger by registering a nil handler or filter to
-the same name.
-
-When a logger is added, the logging framework owns its lifecycle. The
-framework will call Open or Close as needed, especially during calls to
-AddLogger, or Close/Reopen.
-
-This package is designed to affect the whole process, thus all functions are
-package-level. At init time, it is a no-op. This way, different packages are
-free to use it as needed. A process needs to explicitly add loggers in its
-main() method to activate it.
-
-The logging package levels are roughly model'ed after syslog. It adds TRACE,
-and removes NOTICE, ALERT and EMERGENCY.
+Note that this affect the whole process.
 
 
-## NOTE
+## Framework Runtime
 
-Most of the helper methods (.Trace, .Debug, .Info, etc) all take a Context
-as the first parameter. Some environments require that context e.g. App
-Engine.
+At startup, logging is closed.
+
+It must be started explicitly by calling logging.Reopen(flushInterval,
+buffersize).
+
+
+## Levels based on syslog
+
+The levels are roughly model'ed after syslog. We however remove ALERT and
+EMERGENCY.
+
+
+## Context
+
+All the logging methods (.Trace, .Debug, .Info, etc) take a Context as the
+first parameter.
+
+This allows us grab information from the context where appropriate e.g. App
+Engine, HTTP Request, etc.
+
+
+## Debugging
+
+When messages are logged at debug level and lower, we include the program
+counter file/line info.
+
+
+## Typical Usage
+
+Initialization:
+
+```go
+    logging.Addhandler(...)...
+    logging.Addhandler("", ...)
+    logging.AddLogger("", ...)
+    logging.Open(flushInterval, buffersize)
+    // ...
+    logging.Close()
+```
+
+Usage:
+
+```go
+    Logger log = logging.PkgLogger()
+    log.Info(ctx, formatString, params...)
+    log.Info(nil, formatString, params...)
+```
 
 ## Exported Package API
 
 ```go
-var PopulatePCLevel = TRACE ...
-func AddLogger(name string, f Filter, h Handler, async bool) (err error)
-func AddLoggers(files []string, writers map[string]io.Writer, minLevel Level, bufsize int, ...) (err error)
-func Always(ctx interface{}, message string, params ...interface{}) error
+var FilterRejectedErr = errorutil.String("logging: log level lower than logger threshold") ...
+var AppContextKey = new(int)
+var ErrorContextKey = new(int)
+func AddHandler(name string, f Handler) (err error)
 func Close() error
-func Debug(ctx interface{}, message string, params ...interface{}) error
-func Error(ctx interface{}, message string, params ...interface{}) error
-func Error2(ctx interface{}, err error, message string, params ...interface{}) error
-func Info(ctx interface{}, message string, params ...interface{}) error
-func Log(ctx interface{}, calldepth uint8, level Level, message string, ...) error
+func Flush() error
+func Open(flush time.Duration, buffer uint16, populatePC Level) error
 func Reopen() error
-func Severe(ctx interface{}, message string, params ...interface{}) error
-func Trace(ctx interface{}, message string, params ...interface{}) error
-func Warning(ctx interface{}, message string, params ...interface{}) error
+func NewHandlerWriter(w io.Writer, fname string, fmt Format, ff Filter) *baseHandlerWriter
 type Config struct{ ... }
-type Detachable interface{ ... }
 type Filter interface{ ... }
-type FilterFunc func(ctx interface{}, target string, level Level) (bool, error)
+type FilterFunc func(ctx context.Context, r Record) error
     func FilterByLevel(level Level) FilterFunc
+type Format uint8
+    const Human Format = 2 + iota ...
+type Formatter interface{ ... }
 type Handler interface{ ... }
-    func NewHandlerWriter(w io.Writer, fname string, buf []byte, flushInterval time.Duration) (hr Handler)
-type HandlerFunc func(ctx interface{}, r Record) error
-type HasHostRequestId interface{ ... }
-type HasId interface{ ... }
+type HandlerFunc func(ctx context.Context, r Record) error
 type Level uint8
-    const ALL Level = 100 + iota ...
+    const INVALID Level = 0 ...
     func ParseLevel(s string) (l Level)
+type Logger struct{ ... }
+    func AddLogger(name string, minLevel Level, backtraces []backtrace, handlerNames []string) (l *Logger)
+    func NamedLogger(name string) *Logger
+    func PkgLogger() *Logger
 type Noop struct{}
-type Opener interface{ ... }
 type Record struct{ ... }
 ```

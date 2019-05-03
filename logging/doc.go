@@ -1,21 +1,37 @@
 /*
 Package logging provides a precise logging framework.
 
+LogRecord
+
 A LogRecord can be sent by the application. It contains a level,
 message, timestamp, target (which subsystem the message came from) and
 PC information (file, line number).
 
+Filter
+
 A Filter can determine whether a LogRecord should be accepted or not.
+
+Handle
+
+A Handle can persist a LogRecord as it deems fit.
+Each Handle can have a (set of) Filters configured.
+The Handle will log a record iff all Filters accept it.
+The lifecycle of a Handle is: init, open, log OR flush ..., close.
+
+Multiple Handles can be configured on a running system.
+
+All Handles will write to an in-memory buffer which can typically hold up to
+20 log records. When the buffer cannot add another log record, it is flushed.
+
+Once a Handle has been created for a given name, it cannot be replaced.
+
+Formatter
 
 A Formatter can take a LogRecord and convert it to a string for easy persisting.
 
-A Handle can persist a LogRecord as it deems fit.
-Each Handle can have a (set of) Filters configured. The Handle will log
-a record iff all Filters accept it.
 A Handle *may* have a Formatter determine how the LogRecord should be persisted.
-The lifecycle of a Handle is: init, log OR flush ..., close.
 
-Multiple Handles can be configured on a running system.
+Logger
 
 A Logger can be retrieved for any subsystem (target). This can be retrieved explicitly
 by name or implicitly (where we use the package path to infer the subsystem).
@@ -28,10 +44,13 @@ so it can bypass logging quickly.
 
 There is no hierachy of Loggers.
 
-Typical Usage:
+Once a Logger has been retrieved for a given subsystem, it cannot be replaced.
 
-  Logger log = logging.PkgLogger()
-  log.Info(ctx, formatString, params...)
+Flushing
+
+The framework has a timer that will flush each Handle when triggered.
+
+Framework Initialization
 
 The logging framework is typically initialized by the running application
 ie early in its main method.
@@ -44,48 +63,55 @@ the logging framework is initialized. If it was not initialized apriori,
 then it is initialized to have a single Handle that writes a single human
 readable line for each log record with minimum level of INFO.
 
-All Handles will write to an in-memory buffer which can typically hold up to
-20 log records. When the buffer cannot add another log record, it is flushed.
-Also, the framework has a timer that will flush each Handle when triggered.
+A Handler factory is registered by passing in a function that takes
+  - Properties map[string]interface{}
+  - Filter ... (set of Filters)
 
+When a Logger is configured to use a handler, that handler is created and
+initialized lazily at first use.
 
+Note that this affect the whole process. 
 
+Framework Runtime
 
-On the backend, Loggers (encapsulation of filter and handler/writer)
-are registered to a name.
+At startup, logging is closed.
 
-When a Record is created, it is dispatched to all registered
-Loggers. Each Logger will then publish the record if its filter accepts
-it.
+It must be started explicitly by calling logging.Reopen(flushInterval, buffersize).
 
-The easiest way to build a filter is off a Level. There's a convenience
-Filter for that.
+Levels based on syslog
 
-By default, a single logger is initialized bound by name "". It uses a
-built-in handler which writes a single line to the standard output
-stream.
+The levels are roughly model'ed after syslog.
+We however remove ALERT and EMERGENCY.
 
-You can replace a logger by registering a non-nil handler and filter to
-the same name. You can remove a logger by registering a nil handler or
-filter to the same name.
+Context
 
-When a logger is added, the logging framework owns its lifecycle.
-The framework will call Open or Close as needed, especially during calls to
-AddLogger, or Close/Reopen.
+All the logging methods (.Trace, .Debug, .Info, etc) take a
+Context as the first parameter. 
 
-This package is designed to affect the whole process, thus all functions are
-package-level. At init time, it is a no-op. This way, different packages
-are free to use it as needed. A process needs to explicitly add loggers
-in its main() method to activate it.
+This allows us grab information from the context where appropriate
+e.g. App Engine, HTTP Request, etc.
 
-The logging package levels are roughly model'ed after syslog. It adds
-TRACE, and removes NOTICE, ALERT and EMERGENCY.
+Debugging
 
-NOTE
+When messages are logged at debug level and lower, we include the
+program counter file/line info.
 
-Most of the helper methods (.Trace, .Debug, .Info, etc) all take a
-Context as the first parameter. Some environments require that context
-e.g. App Engine.
+Typical Usage
+
+Initialization:
+
+  logging.Addhandler(...)...
+  logging.Addhandler("", ...)
+  logging.AddLogger("", ...)
+  logging.Open(flushInterval, buffersize)
+  // ...
+  logging.Close()
+
+Usage:
+
+  Logger log = logging.PkgLogger()
+  log.Info(ctx, formatString, params...)
+  log.Info(nil, formatString, params...)
 
 */
 package logging
