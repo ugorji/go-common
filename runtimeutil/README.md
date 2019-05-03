@@ -22,6 +22,7 @@ by adding "ugorji=1" to the GODEBUG environmental variable.
 func Debug() bool
 func FileLine(calldepth uint8) (func0, file string, line int)
 func FuncFileLine(calldepth uint8) (func0, file string, line int)
+func P(pattern string, args ...interface{})
 func PkgFuncFileLine(calldepth uint8) (subsystem, func0, file string, line int)
 func Stack(bs []byte, all bool) []byte
 ```

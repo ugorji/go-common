@@ -1,6 +1,7 @@
 package runtimeutil
 
 import (
+	"fmt"
 	"os"
 	"runtime"
 	"strings"
@@ -132,7 +133,7 @@ func pkgFuncFileLine(calldepth uint8, inclPkg, inclFunc bool) (subsystem, func0,
 			if slashpos == -1 {
 				slashpos = j
 			}
-		} else if r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) {
+		} else if !(r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)) {
 			nonpos = j
 			slashpos = -1
 		}
@@ -163,4 +164,18 @@ func Stack(bs []byte, all bool) []byte {
 	}
 	return bs
 	// debug.PrintStack()
+}
+
+// P printf. the message in red on the terminal.
+// Use it in place of fmt.Printf (which it calls internally).
+//
+// It also adds diagnostics: package, file, line, func:
+func P(pattern string, args ...interface{}) {
+	var delim string
+	if len(pattern) > 0 && pattern[len(pattern)-1] != '\n' {
+		delim = "\n"
+	}
+	p, fn, f, l := PkgFuncFileLine(2)
+	fmt.Fprintf(os.Stderr, "\033[1;31m"+fmt.Sprintf(">>gid: %d, %s:%d %s.%s ", curGoroutineID(), f, l, p, fn)+pattern+delim+"\033[0m", args...)
+	os.Stderr.Sync()
 }
