@@ -393,6 +393,10 @@ func (l *Logger) logR(calldepth uint8, level Level, ctx context.Context, message
 	if isClosed() {
 		return
 	}
+	if ctx == nil {
+		ctx = context.TODO()
+	}
+
 	// defer func() { runtimeutil.P("logR error: %v", err) }()
 
 	defer errorutil.OnError(&err)
@@ -465,6 +469,10 @@ func (l *Logger) Debug(ctx context.Context, message string, params ...interface{
 
 func (l *Logger) Info(ctx context.Context, message string, params ...interface{}) error {
 	return l.logR(y.calldepthDelta, INFO, ctx, message, params...)
+}
+
+func (l *Logger) Notice(ctx context.Context, message string, params ...interface{}) error {
+	return l.logR(y.calldepthDelta, NOTICE, ctx, message, params...)
 }
 
 func (l *Logger) Warning(ctx context.Context, message string, params ...interface{}) error {

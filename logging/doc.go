@@ -25,6 +25,9 @@ All Handles will write to an in-memory buffer which can typically hold up to
 
 Once a Handle has been created for a given name, it cannot be replaced.
 
+This allows you to have different Handles who can log based on different criteria
+e.g. stackdriver only logs error and severe messages from web container at night.
+
 Formatter
 
 A Formatter can take a LogRecord and convert it to a string for easy persisting.

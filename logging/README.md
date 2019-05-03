@@ -41,6 +41,10 @@ flushed.
 
 Once a Handle has been created for a given name, it cannot be replaced.
 
+This allows you to have different Handles who can log based on different
+criteria e.g. stackdriver only logs error and severe messages from web
+container at night.
+
 
 ## Formatter
 
