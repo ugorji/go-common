@@ -155,7 +155,7 @@ func Stack(bs []byte, all bool) []byte {
 			bs = make([]byte, newlen)
 		}
 		i := runtime.Stack(bs, all)
-		if i < len(bs) {
+		if i < len(bs)-1 {
 			bs = bs[:i+1]
 			bs[i] = '\n'
 			break
@@ -176,6 +176,6 @@ func P(pattern string, args ...interface{}) {
 		delim = "\n"
 	}
 	p, fn, f, l := PkgFuncFileLine(2)
-	fmt.Fprintf(os.Stderr, "\033[1;31m"+fmt.Sprintf(">>gid: %d, %s:%d %s.%s ", curGoroutineID(), f, l, p, fn)+pattern+delim+"\033[0m", args...)
+	fmt.Fprintf(os.Stderr, "\033[1;31m"+fmt.Sprintf(">>gid: %d, %s:%d %s.%s] ", curGoroutineID(), f, l, p, fn)+pattern+delim+"\033[0m", args...)
 	os.Stderr.Sync()
 }
