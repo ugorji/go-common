@@ -93,7 +93,7 @@ type baseHandlerWriter struct {
 //
 // if w=nil and fname is <stderr> or <stdout> respectively,
 // then write to the standard err or standart out streams respectively.
-func NewHandlerWriter(w io.Writer, fname string, fmt Format, ff Filter) *baseHandlerWriter {
+func NewHandlerWriter(w io.Writer, fname string, fmt Format, ff Filter) (h *baseHandlerWriter) {
 	if w == nil {
 		switch fname {
 		case "<stderr>":
@@ -102,22 +102,26 @@ func NewHandlerWriter(w io.Writer, fname string, fmt Format, ff Filter) *baseHan
 			w = os.Stdout
 		}
 	}
-	if w == nil && fname == "" {
+	if w != nil {
+		fname = ""
+	} else if fname == "" {
 		return nil
 	}
-	// TODO: support more than just HUMAN format
-	var fmter Formatter = humanFormatter{}
 
 	// runtimeutil.P("returning new baseHandlerWriter: w: %v, fname: %s", w, fname)
-	// debug.PrintStack()
-	return &baseHandlerWriter{
+
+	h = &baseHandlerWriter{
 		w0:     w,
 		fname:  fname,
-		fmt:    fmt,
-		fmter:  fmter,
 		ff:     ff,
 		closed: 1,
 	}
+
+	// TODO: support more than just HUMAN format (we currently override to just Human)
+	h.fmt = Human
+	h.fmter = humanFormatter{}
+
+	return
 }
 
 func (h *baseHandlerWriter) Open(buffer uint16) (err error) {

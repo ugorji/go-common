@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -37,19 +38,29 @@ var y = struct {
 	loggers  map[string]*Logger
 	handlers map[string]Handler
 	// handlerFactories map[string]HandlerFactory
+
 	// sealed       bool   // once sealed, the system cannot add any more handlers or modify them.
 	closed          bool   // once closed, no logging can happen again
 	closedUint32    uint32 // closed = 1, open = 0 // mirror of closed, for atomic access
 	populatePCLevel Level  // PopulatePCLevel is threshold up to which we log file/line information
+	minLevel        Level  // minLevel is default for each implicitly created Logger
+
+	stderrHandlerName string
+	stderrHandler     Handler
+
+	stdoutHandlerName string
+	stdoutHandler     Handler
 }{
-	closed:         true, // starts closed
-	closedUint32:   1,
-	calldepthDelta: 2, // TODO: what is the appropriate value here? test it.
-	handlers:       make(map[string]Handler),
-	loggers:        make(map[string]*Logger),
-	// handlerFactories: make(map[string]HandlerFactory),
+	closed:          true, // starts closed
+	closedUint32:    1,
+	calldepthDelta:  2,
+	handlers:        make(map[string]Handler),
+	loggers:         make(map[string]*Logger),
 	flush:           5 * time.Second,
+	buffer:          32 << 10, // 32KB, enough for roughly 100 lines
 	populatePCLevel: WARNING,
+	minLevel:        INFO,
+	// handlerFactories: make(map[string]HandlerFactory),
 	// noopLogger: &Logger{},
 }
 
@@ -63,6 +74,9 @@ var (
 	FilterRejectedErr     = errorutil.String("logging: log level lower than logger threshold")
 	EmptyMessageErr       = errorutil.String("logging: empty message")
 	NoWriterForHandlerErr = errorutil.String("logging: no writer for handler")
+
+	OnlyOneStderrHandlerErr = errorutil.String("logging: only one stderr handler can exist")
+	OnlyOneStdoutHandlerErr = errorutil.String("logging: only one stdout handler can exist")
 
 	// ClosedErr is returned if we try to do something when logging is closed.
 	// TODO: use this across the board (sometimes we return nil wrongly)
@@ -148,44 +162,59 @@ func (f HandlerFunc) Flush() error                               { return nil }
 func (f HandlerFunc) Close() error                               { return nil }
 func (f HandlerFunc) Open(buffer uint16) error                   { return nil }
 
-// func existingLogger(name string) (l *Logger, closed, sealed bool) {
-// 	y.mu.RLock()
-// 	if y.sealed {
-// 		sealed = true
-// 	}
-// 	if y.closed {
-// 		closed = true
-// 		y.mu.RUnlock()
-// 		return
-// 	}
-// 	l = y.loggers[name]
-// 	y.mu.RUnlock()
-// 	return
-// }
-
+// AddHandler will bind a handler to a given name,
+// iff no handler is bound to that name.
+//
+// Note that a Handler is bound one time only.
 func AddHandler(name string, f Handler) (err error) {
 	y.mu.Lock()
 	defer y.mu.Unlock()
 	// if y.closed { // || y.sealed {
 	// 	return
 	// }
+	return addHandler(name, f)
+}
+
+// addHandler is called within AddHandler or baseLogger, within a lock
+//
+// Note that only one handler can be attached to os.Stderr or os.Stdout
+func addHandler(name string, f Handler) (err error) {
 	if _, ok := y.handlers[name]; ok {
 		// delete(y.handlers, name)
 		return
+	}
+	if w, ok := f.(*baseHandlerWriter); ok {
+		runtimeutil.P("baseHandlerWriter: name: '%s', stdout: %v, stderr: %v", name, w.w0 == os.Stdout, w.w0 == os.Stderr)
+		debug.PrintStack()
+		if w.w0 == os.Stderr {
+			if y.stderrHandler != nil {
+				return OnlyOneStderrHandlerErr
+			}
+			y.stderrHandlerName = name
+			y.stderrHandler = f
+		} else if w.w0 == os.Stdout {
+			if y.stdoutHandler != nil {
+				return OnlyOneStdoutHandlerErr
+			}
+			y.stdoutHandlerName = name
+			y.stdoutHandler = f
+		}
 	}
 	y.handlers[name] = f
 	if !y.closed {
 		err = f.Open(y.buffer)
 	}
+	runtimeutil.P("handler: name: '%s'", name)
 	return
 	// y.handlerFactories[name] = f
 }
 
-// AddLogger will add/replace/delete a new logger to the set.
-// It first removes the logger bound to the name (if exists),
-// and then adds a new logger if filter and handler are non-nil.
-// When removing a logger, it tries to call h.Close().
-// When adding a logger, it tries to call h.Open().
+// AddLogger will return existing Logger by given name, or
+// create one if not existing using parameters passed.
+//
+// If the name "" is not bound to any logger, it is
+// created and will serve as the prototype for minLevel and handlers
+// if invalid or nil parameters passed.
 func AddLogger(name string, minLevel Level, backtraces []backtrace, handlerNames []string) (l *Logger) {
 	y.mu.RLock()
 	// if y.closed {
@@ -225,7 +254,22 @@ func AddLogger(name string, minLevel Level, backtraces []backtrace, handlerNames
 	return
 }
 
-// this function is only called by AddLogger, within a lock
+// this function is only called by baseLogger, called by AddLogger, within a lock
+func addBaseLogger(l *Logger, n string, hh Handler) {
+	l.handlerNames = []string{n}
+	l.handlers = []Handler{hh}
+	y.loggers[""] = l
+}
+
+// baseLogger will return the Logger bound to "".
+//
+// If none is bound, it will create a Logger bound to "" using the handler
+//    - ... bound to a handler "" if it exists
+//    - ... bound to the single configured handler
+//    - ... if multiple handlers, bind it to the one writing to Stderr in Human format
+//    - ... create new Handler writing to Stderr in Human format
+//
+// baseLogger is only called by AddLogger, within a lock
 func baseLogger() (l *Logger) {
 	// this is the logger attached to a blank name.
 	// if none found, make a new one
@@ -233,41 +277,43 @@ func baseLogger() (l *Logger) {
 	if l != nil {
 		return
 	}
-	l = &Logger{minLevel: INFO}
-	var addIt = func(n string, hh Handler) *Logger {
-		l.handlerNames = []string{n}
-		l.handlers = []Handler{hh}
-		y.loggers[""] = l
-		return l
-	}
-	// if only one handler, use it.
-	// else look for the handler that writes to an io.Writer which is stderr, with human formatter
-	// else initialize it to that one, with the name ""
-	if hh := y.handlers[""]; hh != nil {
-		return addIt("", hh)
+	l = &Logger{minLevel: y.minLevel}
+	var n string
+	var hh Handler
+	if hh = y.handlers[n]; hh != nil {
+		addBaseLogger(l, n, hh)
+		return
 	}
 	switch len(y.handlers) {
 	case 0:
 	case 1:
-		for n, hh := range y.handlers {
-			return addIt(n, hh)
+		for n, hh = range y.handlers {
+			addBaseLogger(l, n, hh)
+			return
 		}
 	default:
-		for n, hh := range y.handlers {
-			// look for the handler that writes to an io.Writer which is stderr, with human formatter
-			if w, ok := hh.(*baseHandlerWriter); ok && w.w0 == os.Stderr && w.fmt == Human {
-				return addIt(n, hh)
-			}
+		n, hh = y.stderrHandlerName, y.stderrHandler
+		if hh != nil {
+			addBaseLogger(l, n, hh)
+			return
 		}
+		// for n, hh = range y.handlers {
+		// 	// look for handler writing to stderr with human formatter
+		// 	if w, ok := hh.(*baseHandlerWriter); ok && w.w0 == os.Stderr {
+		// 		addBaseLogger(l, n, hh)
+		// 		return
+		// 	}
+		// }
 	}
 	// create new one
-	n := "<stderr>"
-	hh := NewHandlerWriter(os.Stderr, n, Human, nil)
-	if err := hh.Open(y.buffer); err != nil {
-		runtimeutil.P("error getting baseLogger: %v", err)
+	n = ""
+	hh = NewHandlerWriter(os.Stderr, n, Human, nil)
+	if err := addHandler(n, hh); err != nil {
+		runtimeutil.P("error creating/adding os.Stderr Handler for baseLogger: %v", err)
 		panic(err)
 	}
-	return addIt(n, hh)
+	addBaseLogger(l, n, hh)
+	return
 }
 
 func isClosed() bool {
@@ -295,19 +341,25 @@ func FilterByLevel(level Level) FilterFunc {
 	return x
 }
 
-func Open(flush time.Duration, buffer uint16, populatePC Level) error {
+func Open(flush time.Duration, buffer uint16, minLevel, populatePCLevel Level) error {
 	y.mu.Lock()
 	defer y.mu.Unlock()
 	if !y.closed {
 		return nil
 	}
 
-	y.flush = flush
-	y.buffer = buffer
-	if populatePC == INVALID {
-		populatePC = WARNING
+	if y.flush != 0 {
+		y.flush = flush
 	}
-	y.populatePCLevel = populatePC
+	if y.buffer != 0 {
+		y.buffer = buffer
+	}
+	if populatePCLevel != 0 {
+		y.populatePCLevel = populatePCLevel
+	}
+	if minLevel != 0 {
+		y.minLevel = minLevel
+	}
 
 	var merrs []error
 	f2 := func(h Handler) error { return h.Open(buffer) }
@@ -361,16 +413,17 @@ func Flush() error {
 	return runAllHandlers(f)
 }
 
+// Reopen will close the system if opened, an then Open it
+// using the last configured values (which may be the defaults).
 func Reopen() error {
 	var merrs []error
 	if err := Close(); err != nil {
 		merrs = append(merrs, err)
 	}
-	if err := Open(y.flush, y.buffer, y.populatePCLevel); err != nil {
+	if err := Open(y.flush, y.buffer, y.minLevel, y.populatePCLevel); err != nil {
 		merrs = append(merrs, err)
 	}
 	return merr(merrs)
-
 }
 
 func merr(merrs []error) error {
@@ -424,14 +477,21 @@ func (l *Logger) logR(calldepth uint8, level Level, ctx context.Context, message
 				var xpline int
 				r.Target, r.ProgramFunc, r.ProgramFile, xpline = runtimeutil.PkgFuncFileLine(calldepth + 1)
 				r.ProgramLine = uint16(xpline)
+				// check if backtraces necessary
+				for _, bt := range l.backtraces {
+					if bt.File == r.ProgramFile && bt.Line == r.ProgramLine {
+						if y.stderrHandler != nil {
+							y.stderrHandler.Flush()
+						}
+						os.Stderr.Write(debug.Stack()) // debug.PrintStack()
+						break
+					}
+				}
 			}
-			// }
 			// if r.Seq == 0 {
 			// 	r.Seq = atomic.AddUint32(&y.seq, 1)
+			// }
 			r.TimeUnixNano = time.Now().UnixNano()
-			// Testing. Remove.
-			// fmt.Printf("====> Params: len: %d\n", len(params))
-			// fmt.Printf("====> %#v\n", params)
 			if len(params) == 0 {
 				r.Message = message
 			} else {

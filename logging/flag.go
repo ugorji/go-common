@@ -32,7 +32,7 @@ func (p *Config) Flags(flags *flag.FlagSet) {
 	// flags.StringVar(&p.MinLevelStr, "loglevel", "", "Log Level Threshold")
 	flags.DurationVar(&p.FlushInterval, "logflush", 1*time.Second, "Log Flush Interval")
 	// flags.BoolVar(&p.Async, "logasync", false, "Log Async (using a serialized channel)")
-	flags.IntVar(&p.BufferSize, "logbuf", 64<<10, "Log Buffer Size") //64KB (about 200 lines)
+	flags.IntVar(&p.BufferSize, "logbuf", 32<<10, "Log Buffer Size, up to MaxUint16 (64K)") // 32KB (about 100 lines)
 	flags.Var((*configLevel)(&p.MinLevel), "loglevel", "Log Level Threshold")
 }
 
