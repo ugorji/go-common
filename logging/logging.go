@@ -117,14 +117,14 @@ type logger struct {
 }
 
 type Record struct {
-	Target       string
-	ProgramFile  string
-	ProgramFunc  string
-	Message      string
-	TimeUnixNano int64 //nano seconds since unix epoch
-	// Seq          uint32 // sequence number has to be a property of the Handle
-	ProgramLine uint16
-	Level       Level
+	Target      string    `codec:"s"`
+	ProgramFile string    `codec:"f"`
+	ProgramFunc string    `codec:"c"`
+	Message     string    `codec:"m"`
+	Time        time.Time `codec:"t"`
+	ProgramLine uint16    `codec:"n"`
+	Level       Level     `codec:"l"`
+	// Seq         uint32 // sequence number has to be a property of the Handle
 }
 
 type Formatter interface {
@@ -507,7 +507,7 @@ func (l *logger) logR(calldepth uint8, level Level, ctx context.Context, message
 			// if r.Seq == 0 {
 			// 	r.Seq = atomic.AddUint32(&y.seq, 1)
 			// }
-			r.TimeUnixNano = time.Now().UnixNano()
+			r.Time = time.Now().UTC()
 			if len(params) == 0 {
 				r.Message = message
 			} else {

@@ -2,13 +2,14 @@ package logging
 
 import (
 	"context"
+	"encoding/csv"
 	"io"
 	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
-	"time"
 
+	"github.com/ugorji/go/codec"
 	"github.com/ugorji/go-common/ioutil"
 
 	// "runtime/debug"
@@ -27,25 +28,15 @@ import (
 // 	jsonFormat
 // )
 
-type humanFormatter struct{}
+//const timeFmt = "2006-01-02 15:04:05.000000"
+const timeFmt = "20060102 15:04:05.000000"
 
-func (h humanFormatter) Format(ctx context.Context, r *Record, seqId string) string {
-	//const timeFmt = "2006-01-02 15:04:05.000000"
-	const timeFmt = "0102 15:04:05.000000"
-	// even if file is deleted or moved, write will not fail on an open file descriptor.
-	// so no need to try multiple times.
-	var sId string = "-"
-	if ctx != nil {
-		if appctx, ok := ctx.Value(AppContextKey).(hasId); ok {
-			sId = appctx.Id()
-		}
-	}
-
+func fmtRecordMessage(message string) (msg string) {
 	// Take each Message, and ensure that multi-line messages are indented for clarity
-	msg := r.Message
-	if strings.Index(r.Message, "\n") != -1 {
+	msg = message
+	if strings.Index(message, "\n") != -1 {
 		var buf bytes.Buffer
-		s := r.Message
+		s := message
 		// don't use range. it tries to do utf-8 work.
 		var i, j int = 0, 0
 		for i = 0; i < len(s); i++ {
@@ -60,15 +51,80 @@ func (h humanFormatter) Format(ctx context.Context, r *Record, seqId string) str
 		buf.WriteString(s[j:])
 		msg = string(buf.Bytes())
 	}
+	return
+}
+
+func fmtCtxId(ctx context.Context) (sId string) {
+	sId = "-"
+	if ctx != nil {
+		if appctx, ok := ctx.Value(AppContextKey).(hasId); ok {
+			sId = appctx.Id()
+		}
+	}
+	return
+}
+
+var jsonHandle codec.JsonHandle
+
+type jsonFormatter struct{}
+
+func (h jsonFormatter) Format(ctx context.Context, r *Record, seqId string) string {
+	// const timeFmt = "20060102 15:04:05.000000"
+	var t = struct {
+		Seq       string `codec:"q"`
+		ContextID string `codec:"id"`
+		*Record
+		Message string `codec:"m"`
+	}{seqId, fmtCtxId(ctx), r, fmtRecordMessage(r.Message)}
+	var b []byte
+	codec.NewEncoderBytes(&b, &jsonHandle).MustEncode(&t)
+	return string(b)
+}
+
+type csvFormatter struct{}
+
+func (h csvFormatter) Format(ctx context.Context, r *Record, seqId string) (v string) {
+	// Seq Level Timestamp Target Func File Line Message
+	var s [9]string
+	s[0] = seqId
+	s[1] = fmtCtxId(ctx)
+	s[2] = level2s[r.Level]
+	s[3] = r.Time.Format(timeFmt)
+	s[4] = r.Target
+	s[5] = r.ProgramFunc
+	s[6] = r.ProgramFile
+	s[7] = strconv.Itoa(int(r.ProgramLine))
+	s[8] = fmtRecordMessage(r.Message)
+
+	var buf strings.Builder
+	w := csv.NewWriter(&buf)
+	w.Write(s[:])
+	w.Flush()
+	v = buf.String()
+	// go's csv writer adds a new line to end of output - strip it
+	if v[len(v)-1] == '\n' {
+		v = v[:len(v)-1]
+	}
+	return
+}
+
+type humanFormatter struct{}
+
+func (h humanFormatter) Format(ctx context.Context, r *Record, seqId string) string {
+	// even if file is deleted or moved, write will not fail on an open file descriptor.
+	// so no need to try multiple times.
+	var sId = fmtCtxId(ctx)
+
 	if len(r.ProgramFile) < 2 {
 		return fmt.Sprintf("%c %s %s %v] %s",
-			r.Level.ShortString(), seqId, sId, time.Unix(0, r.TimeUnixNano).UTC().Format(timeFmt),
-			msg)
+			r.Level.ShortString(), seqId, sId, r.Time.Format(timeFmt),
+			r.Target,
+			fmtRecordMessage(r.Message))
 	}
 	return fmt.Sprintf("%c %s %s %v %v %v %v:%v] %s",
-		r.Level.ShortString(), seqId, sId, time.Unix(0, r.TimeUnixNano).UTC().Format(timeFmt),
+		r.Level.ShortString(), seqId, sId, r.Time.Format(timeFmt),
 		r.Target, r.ProgramFunc, r.ProgramFile, r.ProgramLine,
-		msg)
+		fmtRecordMessage(r.Message))
 }
 
 // baseHandlerWriter can handle writing to a stream or a file.
@@ -117,10 +173,18 @@ func NewHandlerWriter(w io.Writer, fname string, fmt Format, ff Filter) (h *base
 		closed: 1,
 	}
 
-	// TODO: support more than just HUMAN format (we currently override to just Human)
-	h.fmt = Human
-	h.fmter = humanFormatter{}
-
+	h.fmt = fmt
+	switch fmt {
+	case Human:
+		h.fmter = humanFormatter{}
+	case JSON:
+		h.fmter = jsonFormatter{}
+	case CSV:
+		h.fmter = csvFormatter{}
+	default:
+		h.fmt = Human
+		h.fmter = humanFormatter{}
+	}
 	return
 }
 

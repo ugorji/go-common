@@ -1,5 +1,7 @@
 package logging
 
+import "github.com/ugorji/go/codec"
+
 // Level is an int representing the log levels.
 //
 // The levels are roughly model'ed around syslog.
@@ -67,6 +69,16 @@ func (l Level) String() string {
 
 func (l Level) ShortString() byte {
 	return level2c[l]
+}
+
+func (l Level) CodecEncodeSelf(e *codec.Encoder) {
+	e.MustEncode(level2s[l])
+}
+
+func (l *Level) CodecDecodeSelf(d *codec.Decoder) {
+	var s string
+	d.MustDecode(&s)
+	*l = level4s[s]
 }
 
 func ParseLevel(s string) (l Level) {
