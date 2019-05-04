@@ -62,6 +62,11 @@ A Logger can be configured to write a backtrace to standard error stream
 at the point that a Log is being generated on a given line in a given go file,
 and at a Level >= the Level for populating the file/line PC info in the Record.
 
+File and Line PC information in logs
+
+Each log Record will contain File and Line PC information if the Level == DEBUG
+or if Level >= populatePCLevel.
+
 Flushing
 
 The framework has a timer that will flush each Handler when triggered.
@@ -129,7 +134,9 @@ Initialization:
 
 Usage:
 
-  Logger log = logging.PkgLogger()
+  // make log a package-level variable
+  var log = logging.PkgLogger()
+  // Use these within your function calls
   log.Info(ctx, formatString, params...)
   log.Info(nil, formatString, params...)
 

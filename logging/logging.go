@@ -35,7 +35,7 @@ var y = struct {
 	// defHandler       Handler
 	tick *time.Ticker
 	// noopLogger *Logger
-	loggers  map[string]*Logger
+	loggers  map[string]*logger
 	handlers map[string]Handler
 	// handlerFactories map[string]HandlerFactory
 
@@ -55,13 +55,13 @@ var y = struct {
 	closedUint32:    1,
 	calldepthDelta:  2,
 	handlers:        make(map[string]Handler),
-	loggers:         make(map[string]*Logger),
+	loggers:         make(map[string]*logger),
 	flush:           5 * time.Second,
 	buffer:          32 << 10, // 32KB, enough for roughly 100 lines
 	populatePCLevel: WARNING,
 	minLevel:        INFO,
 	// handlerFactories: make(map[string]HandlerFactory),
-	// noopLogger: &Logger{},
+	// noopLogger: &logger{},
 }
 
 // ErrorContextKey is the context.Context key used to store an error
@@ -83,6 +83,9 @@ var (
 	ClosedErr = errorutil.String("logging: closed")
 )
 
+const stderr = "<stderr>"
+const stdout = "<stdout>"
+
 type Format uint8
 
 const (
@@ -95,26 +98,25 @@ type hasId interface {
 	Id() string
 }
 
-type backtrace struct {
+type Backtrace struct {
 	File string
 	Line uint16
 }
 
-// logging package has a list of loggers. For each Log Record, it passes it to
-// all the loggers in the list. If a logger accepts it (via Filter), then it's
-// Handler is called to handle the record (it persist it).
 type Logger struct {
+	l *logger
+	n string
+}
+
+type logger struct {
 	name         string
 	minLevel     Level
-	backtraces   []backtrace
+	backtraces   []Backtrace
 	handlerNames []string
 	handlers     []Handler
 }
 
 type Record struct {
-	// record is a compact 10 words.
-	// It is good for copying ... no pointers, no GC.
-
 	Target       string
 	ProgramFile  string
 	ProgramFunc  string
@@ -126,20 +128,20 @@ type Record struct {
 }
 
 type Formatter interface {
-	Format(ctx context.Context, r Record, seqId string) string
+	Format(ctx context.Context, r *Record, seqId string) string
 }
 
 // Noop Handler and Filter.
 type Noop struct{}
 
-func (n Noop) Handle(ctx context.Context, r Record) error { return nil }
-func (n Noop) Accept(ctx context.Context, r Record) error { return nil }
+func (n Noop) Handle(ctx context.Context, r *Record) error { return nil }
+func (n Noop) Accept(ctx context.Context, r *Record) error { return nil }
 
 // type HandlerFactory func(f Filter, flush time.Duration, buf []byte, properties map[string]interface{}) (Handler, error)
 
 type Handler interface {
 	// Name() string
-	Handle(ctx context.Context, r Record) error
+	Handle(ctx context.Context, r *Record) error
 	Filter() Filter
 	Flush() error
 	Close() error
@@ -147,20 +149,20 @@ type Handler interface {
 }
 
 type Filter interface {
-	Accept(ctx context.Context, r Record) error
+	Accept(ctx context.Context, r *Record) error
 }
 
-type FilterFunc func(ctx context.Context, r Record) error
+type FilterFunc func(ctx context.Context, r *Record) error
 
-func (f FilterFunc) Accept(ctx context.Context, r Record) error { return f(ctx, r) }
+func (f FilterFunc) Accept(ctx context.Context, r *Record) error { return f(ctx, r) }
 
-type HandlerFunc func(ctx context.Context, r Record) error
+type HandlerFunc func(ctx context.Context, r *Record) error
 
-func (f HandlerFunc) Handle(ctx context.Context, r Record) error { return f(ctx, r) }
-func (f HandlerFunc) Filter() Filter                             { return nil }
-func (f HandlerFunc) Flush() error                               { return nil }
-func (f HandlerFunc) Close() error                               { return nil }
-func (f HandlerFunc) Open(buffer uint16) error                   { return nil }
+func (f HandlerFunc) Handle(ctx context.Context, r *Record) error { return f(ctx, r) }
+func (f HandlerFunc) Filter() Filter                              { return nil }
+func (f HandlerFunc) Flush() error                                { return nil }
+func (f HandlerFunc) Close() error                                { return nil }
+func (f HandlerFunc) Open(buffer uint16) error                    { return nil }
 
 // AddHandler will bind a handler to a given name,
 // iff no handler is bound to that name.
@@ -185,7 +187,6 @@ func addHandler(name string, f Handler) (err error) {
 	}
 	if w, ok := f.(*baseHandlerWriter); ok {
 		runtimeutil.P("baseHandlerWriter: name: '%s', stdout: %v, stderr: %v", name, w.w0 == os.Stdout, w.w0 == os.Stderr)
-		debug.PrintStack()
 		if w.w0 == os.Stderr {
 			if y.stderrHandler != nil {
 				return OnlyOneStderrHandlerErr
@@ -215,7 +216,7 @@ func addHandler(name string, f Handler) (err error) {
 // If the name "" is not bound to any logger, it is
 // created and will serve as the prototype for minLevel and handlers
 // if invalid or nil parameters passed.
-func AddLogger(name string, minLevel Level, backtraces []backtrace, handlerNames []string) (l *Logger) {
+func AddLogger(name string, minLevel Level, backtraces []Backtrace, handlerNames []string) (l *logger) {
 	y.mu.RLock()
 	// if y.closed {
 	// 	// l = y.noopLogger
@@ -229,7 +230,7 @@ func AddLogger(name string, minLevel Level, backtraces []backtrace, handlerNames
 	}
 	y.mu.Lock()
 	defer y.mu.Unlock()
-	l = &Logger{name: name}
+	l = &logger{name: name}
 	l.backtraces = backtraces
 	b := baseLogger()
 	if minLevel == INVALID {
@@ -250,12 +251,12 @@ func AddLogger(name string, minLevel Level, backtraces []backtrace, handlerNames
 		}
 	}
 	y.loggers[name] = l
-	runtimeutil.P("AddLogger: logger with name: %s and handlers: %v", name, l.handlerNames)
+	runtimeutil.P("logger: name: '%s', level: %c, handlers: %v", name, level2c[l.minLevel], l.handlerNames)
 	return
 }
 
 // this function is only called by baseLogger, called by AddLogger, within a lock
-func addBaseLogger(l *Logger, n string, hh Handler) {
+func addBaseLogger(l *logger, n string, hh Handler) {
 	l.handlerNames = []string{n}
 	l.handlers = []Handler{hh}
 	y.loggers[""] = l
@@ -264,49 +265,61 @@ func addBaseLogger(l *Logger, n string, hh Handler) {
 // baseLogger will return the Logger bound to "".
 //
 // If none is bound, it will create a Logger bound to "" using the handler
-//    - ... bound to a handler "" if it exists
-//    - ... bound to the single configured handler
-//    - ... if multiple handlers, bind it to the one writing to Stderr in Human format
-//    - ... create new Handler writing to Stderr in Human format
+//    - ... bound to a handler "<stderr>" if it exists
+//    - ... bound to the handler writing to Stderr
+//    - ... new Handler writing to Stderr in Human format (bind it to "<stderr>")
+// Note that we do not bind to a handler that is the only one configured,
+// as that is not what the user may want e.g. if stackdriver alone is configure,
+// user may want to only write error messages from 3 subsystems.
 //
 // baseLogger is only called by AddLogger, within a lock
-func baseLogger() (l *Logger) {
+func baseLogger() (l *logger) {
 	// this is the logger attached to a blank name.
 	// if none found, make a new one
 	l = y.loggers[""]
 	if l != nil {
 		return
 	}
-	l = &Logger{minLevel: y.minLevel}
+	l = &logger{minLevel: y.minLevel}
 	var n string
 	var hh Handler
+
+	n = stderr
 	if hh = y.handlers[n]; hh != nil {
 		addBaseLogger(l, n, hh)
 		return
 	}
-	switch len(y.handlers) {
-	case 0:
-	case 1:
-		for n, hh = range y.handlers {
-			addBaseLogger(l, n, hh)
-			return
-		}
-	default:
-		n, hh = y.stderrHandlerName, y.stderrHandler
-		if hh != nil {
-			addBaseLogger(l, n, hh)
-			return
-		}
-		// for n, hh = range y.handlers {
-		// 	// look for handler writing to stderr with human formatter
-		// 	if w, ok := hh.(*baseHandlerWriter); ok && w.w0 == os.Stderr {
-		// 		addBaseLogger(l, n, hh)
-		// 		return
-		// 	}
-		// }
+
+	// switch len(y.handlers) {
+	// case 0:
+	// case 1:
+	// 	for n, hh = range y.handlers {
+	// 		addBaseLogger(l, n, hh)
+	// 		return
+	// 	}
+	// default:
+	// 	n, hh = y.stderrHandlerName, y.stderrHandler
+	// 	if hh != nil {
+	// 		addBaseLogger(l, n, hh)
+	// 		return
+	// 	}
+	// 	// for n, hh = range y.handlers {
+	// 	// 	// look for handler writing to stderr with human formatter
+	// 	// 	if w, ok := hh.(*baseHandlerWriter); ok && w.w0 == os.Stderr {
+	// 	// 		addBaseLogger(l, n, hh)
+	// 	// 		return
+	// 	// 	}
+	// 	// }
+	// }
+
+	n, hh = y.stderrHandlerName, y.stderrHandler
+	if hh != nil {
+		addBaseLogger(l, n, hh)
+		return
 	}
+
 	// create new one
-	n = ""
+	n = stderr
 	hh = NewHandlerWriter(os.Stderr, n, Human, nil)
 	if err := addHandler(n, hh); err != nil {
 		runtimeutil.P("error creating/adding os.Stderr Handler for baseLogger: %v", err)
@@ -322,15 +335,15 @@ func isClosed() bool {
 
 func PkgLogger() *Logger {
 	subsystem, _, _, _ := runtimeutil.PkgFuncFileLine(2)
-	return AddLogger(subsystem, 0, nil, nil)
+	return &Logger{n: subsystem}
 }
 
 func NamedLogger(name string) *Logger {
-	return AddLogger(name, 0, nil, nil)
+	return &Logger{n: name}
 }
 
 func FilterByLevel(level Level) FilterFunc {
-	x := func(_ context.Context, r Record) error {
+	x := func(_ context.Context, r *Record) error {
 		if r.Level < level {
 			// s := "The log record level: %v, is lower than the logger threshold: %v"
 			// return fmt.Errorf(s, r.Level, level)
@@ -436,7 +449,7 @@ func merr(merrs []error) error {
 // func flushLoop() {
 // }
 
-func (l *Logger) logR(calldepth uint8, level Level, ctx context.Context, message string, params ...interface{},
+func (l *logger) logR(calldepth uint8, level Level, ctx context.Context, message string, params ...interface{},
 ) (err error) {
 	// runtimeutil.P("logR called for level: %s, message: %s", level2s[level], message)
 	if l == nil || level < l.minLevel {
@@ -467,15 +480,18 @@ func (l *Logger) logR(calldepth uint8, level Level, ctx context.Context, message
 	// defer y.lmu.Unlock()
 
 	for _, h := range y.handlers {
-		if ff := h.Filter(); ff != nil && ff.Accept(ctx, r) != nil {
+		if ff := h.Filter(); ff != nil && ff.Accept(ctx, &r) != nil {
 			continue
 		}
-
+		// initialize record iff a handler will accept it
 		if r.Message == "" {
 			r.Level = level
-			if level >= y.populatePCLevel && calldepth >= 0 {
+			r.Target = l.name
+			if level == DEBUG || level >= y.populatePCLevel {
 				var xpline int
-				r.Target, r.ProgramFunc, r.ProgramFile, xpline = runtimeutil.PkgFuncFileLine(calldepth + 1)
+				var xpsubsystem string
+				xpsubsystem, r.ProgramFunc, r.ProgramFile, xpline = runtimeutil.PkgFuncFileLine(calldepth + 1)
+				_ = xpsubsystem // r.Target = xpsubsystem
 				r.ProgramLine = uint16(xpline)
 				// check if backtraces necessary
 				for _, bt := range l.backtraces {
@@ -498,12 +514,19 @@ func (l *Logger) logR(calldepth uint8, level Level, ctx context.Context, message
 				r.Message = fmt.Sprintf(message, params...)
 			}
 		}
-		if herr := h.Handle(ctx, r); herr != nil {
+		if herr := h.Handle(ctx, &r); herr != nil {
 			merrs = append(merrs, herr)
 		}
 		// }()
 	}
 	return merr(merrs)
+}
+
+func (l *Logger) ll() *logger {
+	if l.l == nil {
+		l.l = AddLogger(l.n, 0, nil, nil)
+	}
+	return l.l
 }
 
 // Log is the all-encompassing function that can be used by
@@ -516,41 +539,41 @@ func (l *Logger) logR(calldepth uint8, level Level, ctx context.Context, message
 //      logging.Log(nil, 1, level.TRACE, message, params...)
 //    }
 func (l *Logger) Log(ctx context.Context, calldepth uint8, level Level, message string, params ...interface{}) error {
-	return l.logR(y.calldepthDelta+calldepth, level, ctx, message, params...)
+	return l.ll().logR(y.calldepthDelta+calldepth, level, ctx, message, params...)
 }
 
 // func (l *Logger) Trace(ctx context.Context, message string, params ...interface{}) error {
-// 	return l.logR(y.calldepthDelta, ctx, TRACE, message, params...)
+// 	return l.ll().logR(y.calldepthDelta, ctx, TRACE, message, params...)
 // }
 
 func (l *Logger) Debug(ctx context.Context, message string, params ...interface{}) error {
-	return l.logR(y.calldepthDelta, DEBUG, ctx, message, params...)
+	return l.ll().logR(y.calldepthDelta, DEBUG, ctx, message, params...)
 }
 
 func (l *Logger) Info(ctx context.Context, message string, params ...interface{}) error {
-	return l.logR(y.calldepthDelta, INFO, ctx, message, params...)
+	return l.ll().logR(y.calldepthDelta, INFO, ctx, message, params...)
 }
 
 func (l *Logger) Notice(ctx context.Context, message string, params ...interface{}) error {
-	return l.logR(y.calldepthDelta, NOTICE, ctx, message, params...)
+	return l.ll().logR(y.calldepthDelta, NOTICE, ctx, message, params...)
 }
 
 func (l *Logger) Warning(ctx context.Context, message string, params ...interface{}) error {
-	return l.logR(y.calldepthDelta, WARNING, ctx, message, params...)
+	return l.ll().logR(y.calldepthDelta, WARNING, ctx, message, params...)
 }
 
 func (l *Logger) Error(ctx context.Context, message string, params ...interface{}) error {
-	return l.logR(y.calldepthDelta, ERROR, ctx, message, params...)
+	return l.ll().logR(y.calldepthDelta, ERROR, ctx, message, params...)
 }
 
 func (l *Logger) Severe(ctx context.Context, message string, params ...interface{}) error {
-	return l.logR(y.calldepthDelta, SEVERE, ctx, message, params...)
+	return l.ll().logR(y.calldepthDelta, SEVERE, ctx, message, params...)
 }
 
 // Always logs messages at the OFF level, so that it
 // always shows in the log (even if logging is turned off)
 func (l *Logger) Always(ctx context.Context, message string, params ...interface{}) error {
-	return l.logR(y.calldepthDelta, ALWAYS, ctx, message, params...)
+	return l.ll().logR(y.calldepthDelta, ALWAYS, ctx, message, params...)
 }
 
 // Error2 logs an error along with an associated message and possible Trace (if a errorutil.Tracer).
@@ -559,7 +582,7 @@ func (l *Logger) Error2(ctx context.Context, err error, message string, params .
 	if err == nil {
 		return nil
 	}
-	return l.logR(y.calldepthDelta, ERROR, context.WithValue(ctx, ErrorContextKey, err), message, params...)
+	return l.ll().logR(y.calldepthDelta, ERROR, context.WithValue(ctx, ErrorContextKey, err), message, params...)
 
 	// var buf bytes.Buffer
 	// fmt.Fprintf(&buf, message, params...)
@@ -571,7 +594,7 @@ func (l *Logger) Error2(ctx context.Context, err error, message string, params .
 	// // default:
 	// // 	buf.WriteString(err.Error())
 	// // }
-	// return l.logR(y.calldepthDelta, ERROR, ctx, string(buf.Bytes()))
+	// return l.ll().logR(y.calldepthDelta, ERROR, ctx, string(buf.Bytes()))
 }
 
 // func waitForAsync() {

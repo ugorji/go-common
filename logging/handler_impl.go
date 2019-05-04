@@ -29,7 +29,7 @@ import (
 
 type humanFormatter struct{}
 
-func (h humanFormatter) Format(ctx context.Context, r Record, seqId string) string {
+func (h humanFormatter) Format(ctx context.Context, r *Record, seqId string) string {
 	//const timeFmt = "2006-01-02 15:04:05.000000"
 	const timeFmt = "0102 15:04:05.000000"
 	// even if file is deleted or moved, write will not fail on an open file descriptor.
@@ -83,7 +83,7 @@ type baseHandlerWriter struct {
 	mu     sync.RWMutex
 	fmt    Format
 	fmter  Formatter
-	seq    uint32
+	seq    uint64
 	closed uint32 // 1=closed. 0=open. Use mutex/atomic to update.
 }
 
@@ -96,9 +96,9 @@ type baseHandlerWriter struct {
 func NewHandlerWriter(w io.Writer, fname string, fmt Format, ff Filter) (h *baseHandlerWriter) {
 	if w == nil {
 		switch fname {
-		case "<stderr>":
+		case stderr:
 			w = os.Stderr
-		case "<stdout>":
+		case stdout:
 			w = os.Stdout
 		}
 	}
@@ -247,7 +247,7 @@ func (h *baseHandlerWriter) Flush() error {
 
 // Handle writes record to output.
 // If the ctx is a HasHostRequestId or HasId, it writes information about the context.
-func (h *baseHandlerWriter) Handle(ctx context.Context, r Record) (err error) {
+func (h *baseHandlerWriter) Handle(ctx context.Context, r *Record) (err error) {
 	// Handle is on the fast path, so use fine-grained locking, and atomic functions if possible
 	defer errorutil.OnError(&err)
 	if atomic.LoadUint32(&h.closed) == 1 {
@@ -256,7 +256,7 @@ func (h *baseHandlerWriter) Handle(ctx context.Context, r Record) (err error) {
 	var w io.Writer
 	// h.w, h.bw must be accessed within a lock
 	// runtimeutil.P("w: %p, h.w: %p, h.bw: %p, h.w0: %p, h.closed: %d, fname: %s", w, h.w, h.bw, h.w0, h.closed, h.fname)
-	recstr := h.fmter.Format(ctx, r, strconv.Itoa(int(atomic.AddUint32(&h.seq, 1))))
+	recstr := h.fmter.Format(ctx, r, strconv.Itoa(int(atomic.AddUint64(&h.seq, 1))))
 	b := make([]byte, len(recstr)+1)
 	copy(b, recstr)
 	b[len(b)-1] = '\n'

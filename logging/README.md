@@ -90,6 +90,12 @@ and at a Level >= the Level for populating the file/line PC info in the
 Record.
 
 
+## File and Line PC information in logs
+
+Each log Record will contain File and Line PC information if the Level ==
+DEBUG or if Level >= populatePCLevel.
+
+
 ## Flushing
 
 The framework has a timer that will flush each Handler when triggered.
@@ -168,7 +174,9 @@ Initialization:
 Usage:
 
 ```go
-    Logger log = logging.PkgLogger()
+    // make log a package-level variable
+    var log = logging.PkgLogger()
+    // Use these within your function calls
     log.Info(ctx, formatString, params...)
     log.Info(nil, formatString, params...)
 ```
@@ -185,20 +193,21 @@ func Flush() error
 func Open(flush time.Duration, buffer uint16, minLevel, populatePCLevel Level) error
 func Reopen() error
 func NewHandlerWriter(w io.Writer, fname string, fmt Format, ff Filter) (h *baseHandlerWriter)
+func AddLogger(name string, minLevel Level, backtraces []Backtrace, handlerNames []string) (l *logger)
+type Backtrace struct{ ... }
 type Config struct{ ... }
 type Filter interface{ ... }
-type FilterFunc func(ctx context.Context, r Record) error
+type FilterFunc func(ctx context.Context, r *Record) error
     func FilterByLevel(level Level) FilterFunc
 type Format uint8
     const Human Format = 2 + iota ...
 type Formatter interface{ ... }
 type Handler interface{ ... }
-type HandlerFunc func(ctx context.Context, r Record) error
+type HandlerFunc func(ctx context.Context, r *Record) error
 type Level uint8
     const INVALID Level = 0 ...
     func ParseLevel(s string) (l Level)
 type Logger struct{ ... }
-    func AddLogger(name string, minLevel Level, backtraces []backtrace, handlerNames []string) (l *Logger)
     func NamedLogger(name string) *Logger
     func PkgLogger() *Logger
 type Noop struct{}
