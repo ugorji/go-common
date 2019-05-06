@@ -186,6 +186,7 @@ Usage:
 ```go
 var FilterRejectedErr = errorutil.String("logging: log level lower than logger threshold") ...
 var AppContextKey = new(int)
+var CorrelationIDContextKey = new(int)
 var ErrorContextKey = new(int)
 func AddHandler(name string, f Handler) (err error)
 func Close() error

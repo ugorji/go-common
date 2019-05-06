@@ -19,10 +19,13 @@ by adding "ugorji=1" to the GODEBUG environmental variable.
 ## Exported Package API
 
 ```go
+func BytesView(v string) []byte
 func Debug() bool
 func FileLine(calldepth uint8) (func0, file string, line int)
 func FuncFileLine(calldepth uint8) (func0, file string, line int)
+func GoroutineID() uint64
 func P(pattern string, args ...interface{})
 func PkgFuncFileLine(calldepth uint8) (subsystem, func0, file string, line int)
 func Stack(bs []byte, all bool) []byte
+func StringView(v []byte) string
 ```

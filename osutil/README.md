@@ -20,6 +20,7 @@ func AbsPath(path string) (abspath string, err error)
 func ChkDir(dir string) (exists, isDir bool, err error)
 func CopyFile(dest, src string, createDirs bool) (err error)
 func CopyFileToWriter(dest io.Writer, src string) (err error)
+func IsTerminal(fd int) bool
 func MkDir(dir string) (err error)
 func OpenInApplication(uri string) error
 func SymlinkTarget(fi os.FileInfo, fpath string) (fpath2 string, changed bool, err error)
