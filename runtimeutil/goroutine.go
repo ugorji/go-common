@@ -16,14 +16,14 @@ func newGoroutineLock() goroutineLock {
 	if !Debug() {
 		return 0
 	}
-	return goroutineLock(curGoroutineID())
+	return goroutineLock(GoroutineID())
 }
 
 func (g goroutineLock) check() {
 	if !Debug() {
 		return
 	}
-	if curGoroutineID() != uint64(g) {
+	if GoroutineID() != uint64(g) {
 		panic("running on the wrong goroutine")
 	}
 }
@@ -32,14 +32,14 @@ func (g goroutineLock) checkNotOn() {
 	if !Debug() {
 		return
 	}
-	if curGoroutineID() == uint64(g) {
+	if GoroutineID() == uint64(g) {
 		panic("running on the wrong goroutine")
 	}
 }
 
 var goroutineSpace = []byte("goroutine ")
 
-func curGoroutineID() uint64 {
+func GoroutineID() uint64 {
 	bp := littleBuf.Get().(*[]byte)
 	defer littleBuf.Put(bp)
 	b := *bp
