@@ -70,6 +70,10 @@ var ErrorContextKey = new(int)
 // AppContextKey is the context.Context key used to store an app.Context
 var AppContextKey = new(int)
 
+// CorrelationIDContextKey is the context.Context key used to
+// track multiple records as part of a request flow
+var CorrelationIDContextKey = new(int)
+
 var (
 	FilterRejectedErr     = errorutil.String("logging: log level lower than logger threshold")
 	EmptyMessageErr       = errorutil.String("logging: empty message")
@@ -83,6 +87,7 @@ var (
 	ClosedErr = errorutil.String("logging: closed")
 )
 
+// stderr and stdout are the file names used to signify standard error and output respectively
 const stderr = "<stderr>"
 const stdout = "<stdout>"
 
@@ -128,7 +133,7 @@ type Record struct {
 }
 
 type Formatter interface {
-	Format(ctx context.Context, r *Record, seqId string) string
+	Format(ctx context.Context, r *Record, seqId string) []byte
 }
 
 // Noop Handler and Filter.
@@ -485,6 +490,9 @@ func (l *logger) logR(calldepth uint8, level Level, ctx context.Context, message
 		}
 		// initialize record iff a handler will accept it
 		if r.Message == "" {
+			if v := ctx.Value(CorrelationIDContextKey); v == nil {
+				ctx = context.WithValue(ctx, CorrelationIDContextKey, runtimeutil.GoroutineID())
+			}
 			r.Level = level
 			r.Target = l.name
 			if level == DEBUG || level >= y.populatePCLevel {
