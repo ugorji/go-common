@@ -14,14 +14,13 @@ func TestHandleErr(t *testing.T) {
 	fn1 := func() {
 		var err error
 		defer func() { fmt.Fprintf(w, "-\n") }()
-		// defer HandleErr(nil, "s58", &err) //TODO: Fix this line
 		defer func() { fmt.Fprintf(w, "-\n") }()
-		y.populatePCLevel = WARNING
+		y.PopulatePCLevel = WARNING
 		if err = fmt.Errorf("ERROR1"); err != nil {
 			return
 		}
 	}
-	AddHandler("", NewHandlerWriter(w, "", Human, nil))
+	_ = AddHandler("", NewHandlerWriter(w, HumanFormatter{}, nil))
 	AddLogger("", ALWAYS, nil, []string{""})
 	fn1()
 	fmt.Printf("%s", w.String())

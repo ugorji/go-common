@@ -1,7 +1,6 @@
 package logging
 
 import (
-	"bytes"
 	"context"
 	"encoding/csv"
 	"io"
@@ -13,7 +12,6 @@ import (
 	"github.com/ugorji/go/codec"
 	"github.com/ugorji/go-common/ioutil"
 	"github.com/ugorji/go-common/osutil"
-	"github.com/ugorji/go-common/runtimeutil"
 
 	// "runtime/debug"
 
@@ -23,10 +21,11 @@ import (
 	"github.com/ugorji/go-common/errorutil"
 )
 
+// closedErr is returned by a Handler.Handle when logging is closed.
+var closedErr = errorutil.String("logging: closed")
+
 //const timeFmt = "2006-01-02 15:04:05.000000"
 const timeFmt = "20060102 15:04:05.000000"
-
-var terminalCtxKey = new(int)
 
 // fmtRecordMessage ensures that multi-line messages are indented for clarity
 func fmtRecordMessage(s string) string {
@@ -73,11 +72,14 @@ func fmtProgFunc(s string) string {
 	return s
 }
 
-var jsonHandle codec.JsonHandle
+var jsonHandle = codec.JsonHandle{
+	TermWhitespace: true,
+	HTMLCharsAsIs:  true,
+}
 
-type jsonFormatter struct{}
+type JSONFormatter struct{}
 
-func (h jsonFormatter) Format(ctx context.Context, r *Record, seqId string) []byte {
+func (h JSONFormatter) Format(ctx context.Context, r *Record, seqId string, w io.Writer) error {
 	// const timeFmt = "20060102 15:04:05.000000"
 	var t = struct {
 		Seq       string `codec:"q"`
@@ -85,14 +87,12 @@ func (h jsonFormatter) Format(ctx context.Context, r *Record, seqId string) []by
 		*Record
 		Message string `codec:"m"`
 	}{seqId, fmtCtxId(ctx), r, fmtRecordMessage(r.Message)}
-	var b []byte
-	codec.NewEncoderBytes(&b, &jsonHandle).MustEncode(&t)
-	return b
+	return codec.NewEncoder(w, &jsonHandle).Encode(&t)
 }
 
-type csvFormatter struct{}
+type CSVFormatter struct{}
 
-func (h csvFormatter) Format(ctx context.Context, r *Record, seqId string) (v []byte) {
+func (h CSVFormatter) Format(ctx context.Context, r *Record, seqId string, w io.Writer) (err error) {
 	// Seq Level Timestamp Target Func File Line Message
 	var s [9]string
 	s[0] = seqId
@@ -105,50 +105,55 @@ func (h csvFormatter) Format(ctx context.Context, r *Record, seqId string) (v []
 	s[7] = strconv.Itoa(int(r.ProgramLine))
 	s[8] = fmtRecordMessage(r.Message)
 
-	var buf bytes.Buffer
-	w := csv.NewWriter(&buf)
-	w.Write(s[:])
-	w.Flush()
-	v = buf.Bytes()
-	// go's csv writer adds a new line to end of output - strip it
-	if v[len(v)-1] == '\n' {
-		v = v[:len(v)-1]
+	ww := csv.NewWriter(w)
+	if err = ww.Write(s[:]); err == nil {
+		ww.Flush()
+		err = ww.Error()
 	}
+	// v = buf.Bytes()
+	// // go's csv writer adds a new line to end of output - strip it
+	// if v[len(v)-1] == '\n' {
+	// 	v = v[:len(v)-1]
+	// }
 	return
 }
 
-type humanFormatter struct{}
+type HumanFormatter struct {
+	ANSIColor bool
+}
 
-func (h humanFormatter) Format(ctx context.Context, r *Record, seqId string) []byte {
+func (h HumanFormatter) Format(ctx context.Context, r *Record, seqId string, w io.Writer) (err error) {
 	// even if file is deleted or moved, write will not fail on an open file descriptor.
 	// so no need to try multiple times.
 	var sId = fmtCtxId(ctx)
-	var color = terminalCtxKey == ctx.Value(terminalCtxKey)
-	var s string
+	var fmtstr string
 	if len(r.ProgramFile) < 2 {
-		var fmtstr = "%c %s %s %s %s] %s"
-		if color {
-			fmtstr = "%c %s %s \033[0;94m%s\033[0m \033[0;93m%s]\033[0m %s"
+		if h.ANSIColor {
+			fmtstr = "%c %s %s \033[0;94m%s\033[0m \033[0;93m%s]\033[0m %s\n"
+		} else {
+			fmtstr = "%c %s %s %s %s] %s\n"
 		}
-		s = fmt.Sprintf(fmtstr,
+		_, err = fmt.Fprintf(w, fmtstr,
 			r.Level.ShortString(), seqId, sId, r.Time.Format(timeFmt),
 			r.Target,
 			fmtRecordMessage(r.Message))
 	} else {
-		var fmtstr = "%c %s %s %s %s %s %s:%d] %s"
-		if color {
-			fmtstr = "%c %s %s \033[0;94m%s\033[0m \033[0;93m%s\033[0m \033[0;92m%s %s:%d]\033[0m %s"
+		if h.ANSIColor {
+			fmtstr = "%c %s %s \033[0;94m%s\033[0m \033[0;93m%s\033[0m \033[0;92m%s %s:%d]\033[0m %s\n"
+		} else {
+			fmtstr = "%c %s %s %s %s %s %s:%d] %s\n"
 		}
-		s = fmt.Sprintf(fmtstr,
+		_, err = fmt.Fprintf(w, fmtstr,
 			r.Level.ShortString(), seqId, sId, r.Time.Format(timeFmt),
 			r.Target, fmtProgFunc(r.ProgramFunc), r.ProgramFile, r.ProgramLine,
 			fmtRecordMessage(r.Message))
 	}
-	return runtimeutil.BytesView(s)
+	return
+	// return runtimeutil.BytesView(s)
 }
 
-// baseHandlerWriter can handle writing to a stream or a file.
-type baseHandlerWriter struct {
+// handlerWriter can handle writing to a stream or a file.
+type handlerWriter struct {
 	fname  string // file name ("" if not a regular opened file)
 	w0     io.Writer
 	f      *os.File
@@ -156,68 +161,53 @@ type baseHandlerWriter struct {
 	ff     Filter
 	buf    []byte
 	mu     sync.RWMutex
-	fmt    Format
 	fmter  Formatter
 	seq    uint64
 	closed uint32 // 1=closed. 0=open. Use mutex/atomic to update.
-	fd     int
-	nl     [1]byte
 }
 
-// NewHandlerWriter returns an un-opened writer.
+// newHandlerWriter returns an un-opened writer.
 // It returns nil if both w and fname are empty.
 // When passed to AddLogger, AddLogger will call its Open method.
 //
 // if w=nil and fname is <stderr> or <stdout> respectively,
 // then write to the standard err or standart out streams respectively.
-func NewHandlerWriter(w io.Writer, fname string, fmt Format, ff Filter) (h *baseHandlerWriter) {
-	var fd int = -1
-	if w == nil {
-		switch fname {
-		case stderr:
-			w = os.Stderr
-		case stdout:
-			w = os.Stdout
-		}
-	}
+func newHandlerWriter(w io.Writer, fname string, fmter Formatter, ff Filter) (h *handlerWriter) {
 	if w != nil {
 		fname = ""
-		if w == os.Stderr {
-			fd = int(os.Stderr.Fd())
-		} else if w == os.Stdout {
-			fd = int(os.Stdout.Fd())
-		}
 	} else if fname == "" {
 		return nil
 	}
 
-	// runtimeutil.P("returning new baseHandlerWriter: w: %v, fname: %s", w, fname)
+	// runtimeutil.P("returning new handlerWriter: w: %v, fname: %s", w, fname)
 
-	h = &baseHandlerWriter{
+	h = &handlerWriter{
 		w0:     w,
 		fname:  fname,
 		ff:     ff,
 		closed: 1,
-		fd:     fd,
 	}
-	h.nl[0] = '\n'
-	h.fmt = fmt
-	switch fmt {
-	case Human:
-		h.fmter = humanFormatter{}
-	case JSON:
-		h.fmter = jsonFormatter{}
-	case CSV:
-		h.fmter = csvFormatter{}
-	default:
-		h.fmt = Human
-		h.fmter = humanFormatter{}
+
+	if fmter == nil {
+		h.fmter = HumanFormatter{ANSIColor: false}
+	} else {
+		h.fmter = fmter
 	}
 	return
 }
 
-func (h *baseHandlerWriter) Open(buffer uint16) (err error) {
-	// defer func() { runtimeutil.P("baseHandlerWriter.Open closed: %d, error: %v", h.closed, err) }()
+// NewHandlerWriter returns an un-opened handler.
+func NewHandlerWriter(w io.Writer, fmter Formatter, ff Filter) (h *handlerWriter) {
+	return newHandlerWriter(w, "", fmter, ff)
+}
+
+// NewHandlerFile returns an un-opened handler.
+func NewHandlerFile(fname string, fmter Formatter, ff Filter) (h *handlerWriter) {
+	return newHandlerWriter(nil, fname, fmter, ff)
+}
+
+func (h *handlerWriter) Open(buffer uint16) (err error) {
+	// defer func() { runtimeutil.P("handlerWriter.Open closed: %d, error: %v", h.closed, err) }()
 	// debug.PrintStack()
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -242,7 +232,7 @@ func (h *baseHandlerWriter) Open(buffer uint16) (err error) {
 	return
 }
 
-func (h *baseHandlerWriter) Close() (err error) {
+func (h *handlerWriter) Close() (err error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed == 1 {
@@ -263,7 +253,7 @@ func (h *baseHandlerWriter) Close() (err error) {
 	return
 }
 
-func (h *baseHandlerWriter) flush(lock bool) (err error) {
+func (h *handlerWriter) flush(lock bool) (err error) {
 	if lock {
 		h.mu.Lock()
 		defer h.mu.Unlock()
@@ -275,30 +265,59 @@ func (h *baseHandlerWriter) flush(lock bool) (err error) {
 	return
 }
 
-func (h *baseHandlerWriter) Filter() Filter {
+func (h *handlerWriter) Filter() Filter {
 	return h.ff
 }
 
-func (h *baseHandlerWriter) Flush() error {
+func (h *handlerWriter) Flush() error {
 	return h.flush(true)
 }
 
 // Handle writes record to output.
-// If the ctx is a HasHostRequestId or HasId, it writes information about the context.
-func (h *baseHandlerWriter) Handle(ctx context.Context, r *Record) (err error) {
+func (h *handlerWriter) Handle(ctx context.Context, r *Record) (err error) {
 	// Handle is on the fast path, so use fine-grained locking, and atomic functions if possible
 	defer errorutil.OnError(&err)
 	if atomic.LoadUint32(&h.closed) == 1 {
-		return ClosedErr
+		return closedErr
 	}
-	if osutil.IsTerminal(h.fd) {
-		ctx = context.WithValue(ctx, terminalCtxKey, terminalCtxKey)
-	}
-	rec := h.fmter.Format(ctx, r, strconv.Itoa(int(atomic.AddUint64(&h.seq, 1))))
 	h.mu.Lock()
-	if _, err = h.bw.Write(rec); err == nil {
-		_, err = h.bw.Write(h.nl[:])
-	}
+	err = h.fmter.Format(ctx, r, strconv.Itoa(int(atomic.AddUint64(&h.seq, 1))), h.bw)
+	// if _, err = h.bw.Write(rec); err == nil {
+	// 	_, err = h.bw.Write(h.nl[:])
+	// }
 	h.mu.Unlock()
 	return
+}
+
+func lhw(f *os.File) Handler {
+	return NewHandlerWriter(f,
+		// JSONFormatter{},
+		// CSVFormatter{},
+		HumanFormatter{ANSIColor: osutil.IsTerminal(int(f.Fd()))},
+		nil)
+}
+
+// BasicInit is used to simply initialize the logging subsystem.
+//
+// It creates a Handler for each name, logging using the HumanFormatter.
+//
+//   - If the name is "" or <stderr>, then it logs to standard error stream
+//   - Else If the name is <stdout>, then it logs to standard output stream
+//   - Else it logs to a file with the name given
+func BasicInit(names []string, c Config) (err error) {
+	for _, n := range names {
+		switch n {
+		case "", stderrName:
+			err = AddHandler(n, lhw(os.Stderr))
+		case stdoutName:
+			err = AddHandler(n, lhw(os.Stdout))
+		default:
+			err = AddHandler(n, NewHandlerFile(n, HumanFormatter{}, nil))
+		}
+		if err != nil {
+			return
+		}
+	}
+	AddLogger("", c.MinLevel, nil, names)
+	return Open(c)
 }

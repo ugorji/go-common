@@ -56,6 +56,21 @@ There is no hierachy of Loggers.
 
 Once a Logger has been retrieved for a given subsystem, it cannot be replaced.
 
+Customizing Target Subsystem name in Record
+
+By default, the target subsystem is named according to the name of the package,
+or whatever name is explicitly specified by calling NamedLogger.
+
+However, it is possible and sometimes necessary to customize it. For example,
+you have a proxy that handles many different domain names, and you want each to
+have their own grouping of log records. You can specify a function that will
+take the package name and give a richer Target name in the Record.
+
+For simplicity, this "extra" information can be passed into the context by
+the running application using the key: `logging.SubsystemExtraContextKey`.
+The value retrieved from the key, by default, will be a string, or a func() string,
+or a func(string) string, or a value which can be coerced to a string via fmt.Sprintf.
+
 Backtraces
 
 A Logger can be configured to write a backtrace to standard error stream
@@ -65,15 +80,19 @@ and at a Level >= the Level for populating the file/line PC info in the Record.
 File and Line PC information in logs
 
 Each log Record will contain File and Line PC information if the Level == DEBUG
-or if Level >= populatePCLevel.
+or if Level >= populatePCLevel (which is WARNING by default but can be configured).
 
 Flushing
 
 The framework has a timer that will flush each Handler when triggered.
+By default, the timer is triggered every 5 seconds. This can be configured.
 
-Also, each Handle is expected to use a buffer to cache its output.
+Each Handle is expected to use a buffer to cache its output.
 When the buffer is full, it is flushed. Also, the framework timer will
 flush so that you always see log persisted within the timer schedule duration.
+
+Whenever a Record with level NOTICE or higher is logged, the system flushes
+immediately.
 
 Framework Initialization
 
@@ -86,14 +105,7 @@ function taking Config objects that can be configured via json.
 The first time that a LogRecord is to be published, it will ensure that
 the logging framework is initialized. If it was not initialized apriori,
 then it is initialized to have a single Handler that writes a single human
-readable line for each log record with minimum level of INFO.
-
-A Handler factory is registered by passing in a function that takes
-  - Properties map[string]interface{}
-  - Filter ... (set of Filters)
-
-When a Logger is configured to use a handler, that handler is created and
-initialized lazily at first use.
+readable line for each log record with minimum level of NOTICE (can be configured).
 
 Note that this affect the whole process. 
 
@@ -101,12 +113,27 @@ Framework Runtime
 
 At startup, logging is closed.
 
-It must be started explicitly by calling logging.Reopen(flushInterval, buffersize).
+It must be started explicitly by calling logging.Open().
+
+Default Configuration
+
+By default, the logging framework is configured with:
+
+- FlushInterval: 5 seconds
+- BufferSize: 32KB (max of 1MB)
+- PopulatePCLevel: WARNING
+- MinLevel: NOTICE
+- SubsystemFunc: func(context.Context, string)
 
 Levels based on syslog
 
 The levels are roughly model'ed after syslog.
-We however remove ALERT and EMERGENCY.
+We however omit ALERT and EMERGENCY, as we expect these are just finer forms of a
+SEVERE issue, and developers typically cannot separate the two.
+
+We include ALWAYS and OFF for configuration of MinimumLogLevel only.
+This way, it is easy to configure that ALL records should be logged, or no
+records should be logged.
 
 Context
 
@@ -118,8 +145,8 @@ e.g. App Engine, HTTP Request, etc.
 
 Debugging
 
-When messages are logged at debug level and lower, we include the
-program counter file/line info.
+By default, we include the program counter file/line info when logging
+at DEBUG level and at >= WARNING level. The WARNING level can be configured.
 
 Typical Usage
 
@@ -128,7 +155,7 @@ Initialization:
   logging.Addhandler(...)...
   logging.Addhandler("", ...)
   logging.AddLogger("", ...)
-  logging.Open(flushInterval, buffersize)
+  logging.Open(...)
   // ...
   logging.Close()
 

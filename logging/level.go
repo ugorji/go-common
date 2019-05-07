@@ -1,6 +1,10 @@
 package logging
 
-import "github.com/ugorji/go/codec"
+import (
+	"math"
+
+	"github.com/ugorji/go/codec"
+)
 
 // Level is an int representing the log levels.
 //
@@ -8,15 +12,16 @@ import "github.com/ugorji/go/codec"
 type Level uint8
 
 const (
-	INVALID Level = 0
-	ALWAYS  Level = 100 + iota
-	DEBUG         // Debug or trace information.
-	INFO          // Routine information, such as ongoing status or performance
-	NOTICE        // Normal but significant events, such as start up, shut down, or configuration
-	WARNING       // Warning events might cause problems
-	ERROR         // Error events are likely to cause problems
-	SEVERE        // Critical events cause more severe problems or brief outages
-	OFF
+	DEBUG   Level = 100 + iota // Debug or trace information.
+	INFO                       // Routine information, such as ongoing status or performance
+	NOTICE                     // Normal but significant events, such as start up, shut down, config
+	WARNING                    // Warning events might cause problems
+	ERROR                      // Error events are likely to cause problems
+	SEVERE                     // Critical events cause more severe problems or brief outages
+
+	_INVALID Level = 0
+	ALWAYS   Level = 1             // Config only: specify that ALL messages are logged
+	OFF      Level = math.MaxUint8 // Config only: specify that NO messages are logged
 )
 
 var level2c = map[Level]byte{
