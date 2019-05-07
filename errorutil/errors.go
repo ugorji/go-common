@@ -127,10 +127,15 @@ func (e Multi) HasError() (b bool) {
 }
 
 func (e Multi) NonNilError() error {
-	if merrs := e.NonNil(); len(merrs) > 0 {
+	merrs := e.NonNil()
+	switch len(merrs) {
+	case 0:
+		return nil
+	case 1:
+		return merrs[0]
+	default:
 		return merrs
 	}
-	return nil
 }
 
 // Returns the subset of this Multi which are non nil.
