@@ -452,6 +452,8 @@ type deepEqualOpts struct {
 // It skips functions, channels, and non-exported fields in structs.
 // It is better than the DeepEqual in reflect because it gives contextual
 // information back in the error on what was wrong.
+//
+// TODO: let error be a multi error of all the differences in the value (not just first one).
 func DeepEqual(v1, v2 interface{}, strict bool) (err error) {
 	var v1r, v2r reflect.Value
 	var ok bool
@@ -469,11 +471,11 @@ func DeepEqual(v1, v2 interface{}, strict bool) (err error) {
 
 func deepValueEqual(v1, v2 reflect.Value, ctx string, t deepEqualOpts) (err error) {
 	if v1.IsValid() && !v2.IsValid() {
-		err = fmt.Errorf("comparing valid to non-valid value: %s (%v)", ctx, v1)
+		err = fmt.Errorf("comparing valid to non-valid value: %s (%#v)", ctx, v1)
 		return
 	}
 	if !v1.IsValid() && v2.IsValid() {
-		err = fmt.Errorf("comparing non-valid to valid value: %s (%v)", ctx, v2)
+		err = fmt.Errorf("comparing non-valid to valid value: %s (%#v)", ctx, v2)
 		return
 	}
 	if !v1.IsValid() && !v2.IsValid() {
@@ -492,7 +494,7 @@ CHECK1:
 	case reflect.Ptr:
 		if v1.IsNil() {
 			if !(v2.Kind() == reflect.Ptr && v2.IsNil()) {
-				err = fmt.Errorf("compare nil to non-nil pointer: %s (%v)", ctx, v2)
+				err = fmt.Errorf("compare nil to non-nil pointer: %s (%#v)", ctx, v2)
 			}
 			return
 		}
@@ -501,7 +503,7 @@ CHECK1:
 	case reflect.Interface:
 		if v1.IsNil() {
 			if !(v2.Kind() == reflect.Interface && v2.IsNil()) {
-				err = fmt.Errorf("compare nil to non-nil interface: %s (%v)", ctx, v2)
+				err = fmt.Errorf("compare nil to non-nil interface: %s (%#v)", ctx, v2)
 			}
 			return
 		}
@@ -511,12 +513,12 @@ CHECK1:
 		if v1.IsNil() {
 			if v2.Kind() == reflect.Slice {
 				if !v2.IsNil() {
-					err = fmt.Errorf("comparing nil to non-nil slice: %s (%v)", ctx, v2)
+					err = fmt.Errorf("comparing nil to non-nil slice: %s (%#v)", ctx, v2)
 				} else if t.containerNilEqualsZeroLen && v2.Len() != 0 {
-					err = fmt.Errorf("comparing nil to non zero-length slice: %s (%v)", ctx, v2)
+					err = fmt.Errorf("comparing nil to non zero-length slice: %s (%#v)", ctx, v2)
 				}
 			} else {
-				err = fmt.Errorf("comparing nil slice to non-slice: %s (%v)", ctx, v2)
+				err = fmt.Errorf("comparing nil slice to non-slice: %s (%#v)", ctx, v2)
 			}
 			return
 		}
@@ -524,19 +526,19 @@ CHECK1:
 		if v1.IsNil() {
 			if v2.Kind() == reflect.Map {
 				if !v2.IsNil() {
-					err = fmt.Errorf("comparing nil to non-nil map: %s (%v)", ctx, v2)
+					err = fmt.Errorf("comparing nil to non-nil map: %s (%#v)", ctx, v2)
 				} else if t.containerNilEqualsZeroLen && v2.Len() != 0 {
-					err = fmt.Errorf("comparing nil to non zero-length map: %s (%v)", ctx, v2)
+					err = fmt.Errorf("comparing nil to non zero-length map: %s (%#v)", ctx, v2)
 				}
 			} else {
-				err = fmt.Errorf("comparing nil map to non-map: %s (%v)", ctx, v2)
+				err = fmt.Errorf("comparing nil map to non-map: %s (%#v)", ctx, v2)
 			}
 			return
 		}
 	case reflect.Chan:
 		if v1.IsNil() {
 			if !(v2.Kind() == reflect.Chan && v2.IsNil()) {
-				err = fmt.Errorf("compare nil to non-nil chan: %s (%v)", ctx, v2)
+				err = fmt.Errorf("compare nil to non-nil chan: %s (%#v)", ctx, v2)
 			}
 			return
 		}
@@ -545,7 +547,7 @@ CHECK1:
 	case reflect.Func:
 		if v1.IsNil() {
 			if !(v2.Kind() == reflect.Func && v2.IsNil()) {
-				err = fmt.Errorf("compare nil to non-nil func: %s (%v)", ctx, v2)
+				err = fmt.Errorf("compare nil to non-nil func: %s (%#v)", ctx, v2)
 			}
 			return
 		}
@@ -562,7 +564,7 @@ CHECK2:
 	case reflect.Ptr:
 		if v2.IsNil() {
 			if !(v3.Kind() == reflect.Ptr && v3.IsNil()) {
-				err = fmt.Errorf("compare non-nil to nil pointer: %s (%v)", ctx, v3)
+				err = fmt.Errorf("compare non-nil to nil pointer: %s (%#v)", ctx, v3)
 			}
 			return
 		}
@@ -571,7 +573,7 @@ CHECK2:
 	case reflect.Interface:
 		if v2.IsNil() {
 			if !(v3.Kind() == reflect.Interface && v3.IsNil()) {
-				err = fmt.Errorf("compare non-nil to nil interface: %s (%v)", ctx, v3)
+				err = fmt.Errorf("compare non-nil to nil interface: %s (%#v)", ctx, v3)
 			}
 			return
 		}
@@ -581,12 +583,12 @@ CHECK2:
 		if v2.IsNil() {
 			if v3.Kind() == reflect.Slice {
 				if !v3.IsNil() {
-					err = fmt.Errorf("comparing non-nil to nil slice: %s (%v)", ctx, v3)
+					err = fmt.Errorf("comparing non-nil to nil slice: %s (%#v)", ctx, v3)
 				} else if t.containerNilEqualsZeroLen && v3.Len() != 0 {
-					err = fmt.Errorf("comparing non zero-length to nil slice: %s (%v)", ctx, v3)
+					err = fmt.Errorf("comparing non zero-length to nil slice: %s (%#v)", ctx, v3)
 				}
 			} else {
-				err = fmt.Errorf("comparing non-slice to nil slice: %s (%v)", ctx, v3)
+				err = fmt.Errorf("comparing non-slice to nil slice: %s (%#v)", ctx, v3)
 			}
 			return
 		}
@@ -594,19 +596,19 @@ CHECK2:
 		if v2.IsNil() {
 			if v3.Kind() == reflect.Map {
 				if !v3.IsNil() {
-					err = fmt.Errorf("comparing non-nil to nil map: %s (%v)", ctx, v3)
+					err = fmt.Errorf("comparing non-nil to nil map: %s (%#v)", ctx, v3)
 				} else if t.containerNilEqualsZeroLen && v3.Len() != 0 {
-					err = fmt.Errorf("comparing non zero-length to nil map: %s (%v)", ctx, v3)
+					err = fmt.Errorf("comparing non zero-length to nil map: %s (%#v)", ctx, v3)
 				}
 			} else {
-				err = fmt.Errorf("comparing non-map to nil map: %s (%v)", ctx, v3)
+				err = fmt.Errorf("comparing non-map to nil map: %s (%#v)", ctx, v3)
 			}
 			return
 		}
 	case reflect.Chan:
 		if v2.IsNil() {
 			if !(v3.Kind() == reflect.Chan && v3.IsNil()) {
-				err = fmt.Errorf("compare nil to non-nil chan: %s (%v)", ctx, v3)
+				err = fmt.Errorf("compare nil to non-nil chan: %s (%#v)", ctx, v3)
 			}
 			return
 		}
@@ -615,7 +617,7 @@ CHECK2:
 	case reflect.Func:
 		if v2.IsNil() {
 			if !(v3.Kind() == reflect.Func && v3.IsNil()) {
-				err = fmt.Errorf("compare nil to non-nil func: %s (%v)", ctx, v3)
+				err = fmt.Errorf("compare nil to non-nil func: %s (%#v)", ctx, v3)
 			}
 			return
 		}
@@ -645,7 +647,8 @@ CHECK2:
 	switch v1.Kind() {
 	case reflect.Struct:
 		for i, n := 0, v1.NumField(); i < n; i++ {
-			if err = deepValueEqual(v1.Field(i), v2.Field(i), ctx+"/field:"+strconv.Itoa(i), t); err != nil {
+			sf := v1.Type().Field(i)
+			if err = deepValueEqual(v1.Field(i), v2.Field(i), ctx+"/field:"+sf.Name+"("+strconv.Itoa(i)+")", t); err != nil {
 				return
 			}
 		}
