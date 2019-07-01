@@ -60,6 +60,9 @@ func GrowCap(oldCap, unit, num int) (newCap int) {
 	if num > 0 {
 		newCap += num
 	}
+	if newCap <= oldCap {
+		newCap = oldCap + 1
+	}
 
 	// ensure newCap is a multiple of 64 (if it is > 64)
 	// we want this inlined, so DONT use a const declaration.
