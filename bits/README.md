@@ -16,7 +16,8 @@ Package bits enables dealing with bit sets.
 ## Exported Package API
 
 ```go
-func HalfFloatToFloatBits(yy uint16) (d uint32)
+func FloatToHalfFloatBits(i uint32) (h uint16)
+func HalfFloatToFloatBits(h uint16) (f uint32)
 func PruneLeading(v []byte, pruneVal byte) (n int)
 func PruneSignExt(v []byte, pos bool) (n int)
 type Set []byte
