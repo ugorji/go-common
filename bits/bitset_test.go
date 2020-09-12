@@ -14,7 +14,7 @@ var testBitsetTable = []struct {
 func TestBitset(t *testing.T) {
 	for _, tb := range testBitsetTable {
 		t.Logf("Testing: %v", tb)
-		b := new(Bitset)
+		b := new(Set)
 		for _, i := range tb.Set {
 			b.Set(i)
 		}
@@ -23,7 +23,7 @@ func TestBitset(t *testing.T) {
 		}
 		j := 0
 		for i := 0; i < tb.Max; i++ {
-			bv := b.IsSet(i)
+			bv := b.Is(i)
 			if i == tb.IsSet[j] {
 				if bv {
 					j++
