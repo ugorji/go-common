@@ -1,9 +1,11 @@
 package bits
 
-// validate that this function is correct ...
-// culled from OGRE (Object-Oriented Graphics Rendering Engine)
-// function: halfToFloatI https://www.ogre3d.org/docs/api/1.9/_ogre_bitwise_8h_source.html
 func HalfFloatToFloatBits(h uint16) (f uint32) {
+	// retrofitted from:
+	// - OGRE (Object-Oriented Graphics Rendering Engine)
+	//   function: halfToFloatI https://www.ogre3d.org/docs/api/1.9/_ogre_bitwise_8h_source.html
+	// - http://www.java2s.com/example/java-utility-method/float-to/floattohalf-float-f-fae00.html
+
 	s := uint32((h >> 15) & 0x01)
 	m := uint32(h & 0x03ff)
 	e := int32((h >> 10) & 0x1f)
@@ -34,10 +36,12 @@ func FloatToHalfFloatBits(i uint32) (h uint16) {
 	s := (i >> 16) & 0x8000
 	e := int32(((i >> 23) & 0xff) - (127 - 15))
 	m := i & 0x7fffff
+
 	var h32 uint32
 
 	if e <= 0 {
-		if e < -10 {
+		if e < -10 { // zero
+			h32 = s // track -0 vs +0
 		} else {
 			m = (m | 0x800000) >> uint32(1-e)
 			h32 = s | (m >> 13)
