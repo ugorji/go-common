@@ -4,9 +4,8 @@ func HalfFloatToFloatBits(h uint16) (f uint32) {
 	// retrofitted from:
 	// - OGRE (Object-Oriented Graphics Rendering Engine)
 	//   function: halfToFloatI https://www.ogre3d.org/docs/api/1.9/_ogre_bitwise_8h_source.html
-	// - http://www.java2s.com/example/java-utility-method/float-to/floattohalf-float-f-fae00.html
 
-	s := uint32((h >> 15) & 0x01)
+	s := uint32(h >> 15)
 	m := uint32(h & 0x03ff)
 	e := int32((h >> 10) & 0x1f)
 
@@ -33,6 +32,10 @@ func HalfFloatToFloatBits(h uint16) (f uint32) {
 }
 
 func FloatToHalfFloatBits(i uint32) (h uint16) {
+	// retrofitted from:
+	// - OGRE (Object-Oriented Graphics Rendering Engine)
+	//   function: halfToFloatI https://www.ogre3d.org/docs/api/1.9/_ogre_bitwise_8h_source.html
+	// - http://www.java2s.com/example/java-utility-method/float-to/floattohalf-float-f-fae00.html
 	s := (i >> 16) & 0x8000
 	e := int32(((i >> 23) & 0xff) - (127 - 15))
 	m := i & 0x7fffff
