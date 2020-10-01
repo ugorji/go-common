@@ -470,175 +470,90 @@ func DeepEqual(v1, v2 interface{}, strict bool) (err error) {
 }
 
 func deepValueEqual(v1, v2 reflect.Value, ctx string, t deepEqualOpts) (err error) {
-	if v1.IsValid() && !v2.IsValid() {
-		err = fmt.Errorf("comparing valid to non-valid value: %s (%#v)", ctx, v1)
-		return
-	}
-	if !v1.IsValid() && v2.IsValid() {
-		err = fmt.Errorf("comparing non-valid to valid value: %s (%#v)", ctx, v2)
-		return
-	}
 	if !v1.IsValid() && !v2.IsValid() {
 		return
 	}
-	// we know they are both valid
-
-	if v1.CanAddr() && v2.CanAddr() {
-		if v1.UnsafeAddr() == v2.UnsafeAddr() {
-			return
-		}
+	if v1.IsValid() && !v2.IsValid() {
+		return fmt.Errorf("cannot compare valid to non-valid value: %s (%#v)", ctx, v1)
+	}
+	if !v1.IsValid() && v2.IsValid() {
+		return fmt.Errorf("cannot compare non-valid to valid value: %s (%#v)", ctx, v2)
+	}
+	v1Kind, v2Kind := v1.Kind(), v2.Kind()
+	if v1Kind != v2Kind &&
+		!((v1Kind == reflect.Array && v2Kind == reflect.Slice) || (v1Kind == reflect.Slice && v2Kind == reflect.Array)) {
+		// treat array and slice as similar kinds
+		err = fmt.Errorf("kind mismatch: %s (%v, %v)", ctx, v1.Kind(), v2.Kind())
+		return
 	}
 
-CHECK1:
+	// if v1.Kind() != v2.Kind() {
+	// 	return fmt.Errorf("cannot compare %v to %v kinds: %s (%#v) vs (%#v)", v1.Kind(), v2.Kind(), ctx, v1, v2)
+	// }
+
+	// we know they are both valid and of same kind (treating array and slice kinds as same)
+
+	if v1.CanAddr() && v2.CanAddr() && v1.UnsafeAddr() == v2.UnsafeAddr() {
+		return
+	}
+
 	switch v1.Kind() {
 	case reflect.Ptr:
 		if v1.IsNil() {
-			if !(v2.Kind() == reflect.Ptr && v2.IsNil()) {
-				err = fmt.Errorf("compare nil to non-nil pointer: %s (%#v)", ctx, v2)
+			if !v2.IsNil() {
+				err = fmt.Errorf("expect nil pointer: %s (%#v)", ctx, v2)
 			}
 			return
 		}
-		v1 = v1.Elem()
-		goto CHECK1
+		return deepValueEqual(v1.Elem(), v2.Elem(), ctx, t)
 	case reflect.Interface:
 		if v1.IsNil() {
-			if !(v2.Kind() == reflect.Interface && v2.IsNil()) {
-				err = fmt.Errorf("compare nil to non-nil interface: %s (%#v)", ctx, v2)
+			if !v2.IsNil() {
+				err = fmt.Errorf("expect nil interface: %s (%#v)", ctx, v2)
 			}
 			return
 		}
-		v1 = v1.Elem()
-		goto CHECK1
+		return deepValueEqual(v1.Elem(), v2.Elem(), ctx, t)
 	case reflect.Slice:
 		if v1.IsNil() {
-			if v2.Kind() == reflect.Slice {
-				if !v2.IsNil() {
-					err = fmt.Errorf("comparing nil to non-nil slice: %s (%#v)", ctx, v2)
-				} else if t.containerNilEqualsZeroLen && v2.Len() != 0 {
-					err = fmt.Errorf("comparing nil to non zero-length slice: %s (%#v)", ctx, v2)
-				}
-			} else {
-				err = fmt.Errorf("comparing nil slice to non-slice: %s (%#v)", ctx, v2)
+			if !v2.IsNil() {
+				err = fmt.Errorf("expect nil slice: %s (%#v)", ctx, v2)
+			} else if t.containerNilEqualsZeroLen && v2.Len() != 0 {
+				err = fmt.Errorf("expect nil or non zero-length slice: %s (%#v)", ctx, v2)
 			}
 			return
 		}
 	case reflect.Map:
 		if v1.IsNil() {
-			if v2.Kind() == reflect.Map {
-				if !v2.IsNil() {
-					err = fmt.Errorf("comparing nil to non-nil map: %s (%#v)", ctx, v2)
-				} else if t.containerNilEqualsZeroLen && v2.Len() != 0 {
-					err = fmt.Errorf("comparing nil to non zero-length map: %s (%#v)", ctx, v2)
-				}
-			} else {
-				err = fmt.Errorf("comparing nil map to non-map: %s (%#v)", ctx, v2)
+			if !v2.IsNil() {
+				err = fmt.Errorf("expect nil map: %s (%#v)", ctx, v2)
+			} else if t.containerNilEqualsZeroLen && v2.Len() != 0 {
+				err = fmt.Errorf("expect nil or non zero-length map: %s (%#v)", ctx, v2)
 			}
 			return
 		}
 	case reflect.Chan:
 		if v1.IsNil() {
-			if !(v2.Kind() == reflect.Chan && v2.IsNil()) {
-				err = fmt.Errorf("compare nil to non-nil chan: %s (%#v)", ctx, v2)
+			if !v2.IsNil() {
+				err = fmt.Errorf("expect nil chan: %s (%#v)", ctx, v2)
 			}
 			return
 		}
-		err = fmt.Errorf("cannot compare chan types: %s", ctx)
-		return
+		return fmt.Errorf("cannot compare chan types: %s", ctx)
 	case reflect.Func:
 		if v1.IsNil() {
-			if !(v2.Kind() == reflect.Func && v2.IsNil()) {
+			if !v2.IsNil() {
 				err = fmt.Errorf("compare nil to non-nil func: %s (%#v)", ctx, v2)
 			}
 			return
 		}
-		err = fmt.Errorf("cannot compare func types: %s", ctx)
-		return
+		return fmt.Errorf("cannot compare func types: %s", ctx)
 	}
-
-	// now v1 is non-nil, and not an array, ptr, interface, chan, or func (or other nil-able type)
-
-	v3 := v1
-
-CHECK2:
-	switch v2.Kind() {
-	case reflect.Ptr:
-		if v2.IsNil() {
-			if !(v3.Kind() == reflect.Ptr && v3.IsNil()) {
-				err = fmt.Errorf("compare non-nil to nil pointer: %s (%#v)", ctx, v3)
-			}
-			return
-		}
-		v2 = v2.Elem()
-		goto CHECK2
-	case reflect.Interface:
-		if v2.IsNil() {
-			if !(v3.Kind() == reflect.Interface && v3.IsNil()) {
-				err = fmt.Errorf("compare non-nil to nil interface: %s (%#v)", ctx, v3)
-			}
-			return
-		}
-		v2 = v2.Elem()
-		goto CHECK2
-	case reflect.Slice:
-		if v2.IsNil() {
-			if v3.Kind() == reflect.Slice {
-				if !v3.IsNil() {
-					err = fmt.Errorf("comparing non-nil to nil slice: %s (%#v)", ctx, v3)
-				} else if t.containerNilEqualsZeroLen && v3.Len() != 0 {
-					err = fmt.Errorf("comparing non zero-length to nil slice: %s (%#v)", ctx, v3)
-				}
-			} else {
-				err = fmt.Errorf("comparing non-slice to nil slice: %s (%#v)", ctx, v3)
-			}
-			return
-		}
-	case reflect.Map:
-		if v2.IsNil() {
-			if v3.Kind() == reflect.Map {
-				if !v3.IsNil() {
-					err = fmt.Errorf("comparing non-nil to nil map: %s (%#v)", ctx, v3)
-				} else if t.containerNilEqualsZeroLen && v3.Len() != 0 {
-					err = fmt.Errorf("comparing non zero-length to nil map: %s (%#v)", ctx, v3)
-				}
-			} else {
-				err = fmt.Errorf("comparing non-map to nil map: %s (%#v)", ctx, v3)
-			}
-			return
-		}
-	case reflect.Chan:
-		if v2.IsNil() {
-			if !(v3.Kind() == reflect.Chan && v3.IsNil()) {
-				err = fmt.Errorf("compare nil to non-nil chan: %s (%#v)", ctx, v3)
-			}
-			return
-		}
-		err = fmt.Errorf("cannot compare chan types: %s", ctx)
-		return
-	case reflect.Func:
-		if v2.IsNil() {
-			if !(v3.Kind() == reflect.Func && v3.IsNil()) {
-				err = fmt.Errorf("compare nil to non-nil func: %s (%#v)", ctx, v3)
-			}
-			return
-		}
-		err = fmt.Errorf("cannot compare func types: %s", ctx)
-		return
-	}
-
-	// now v2 is non-nil, and not an array, ptr, interface, chan, or func (or other nil-able type)
 
 	// now call the underlying code that just checks the values.
 
 	if t.typeMustBeEqual && v1.Type() != v2.Type() {
 		err = fmt.Errorf("types mismatch: %s (%v, %v)", ctx, v1.Type(), v2.Type())
-		return
-	}
-
-	v1Kind, v2Kind := v1.Kind(), v2.Kind()
-	if v1.Kind() != v2.Kind() &&
-		!((v1Kind == reflect.Array && v2Kind == reflect.Slice) || (v1Kind == reflect.Slice && v2Kind == reflect.Array)) {
-		// treat array and slice as similar kinds
-		err = fmt.Errorf("kind mismatch: %s (%v, %v)", ctx, v1.Kind(), v2.Kind())
 		return
 	}
 
