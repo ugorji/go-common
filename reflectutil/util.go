@@ -1,10 +1,14 @@
 package reflectutil
 
+// MaxArrayLen is the size of uint, which determines
+// the maximum length of any array.
+const MaxArrayLen = 1<<((32<<(^uint(0)>>63))-1) - 1
+
 // GrowCap will return a new capacity for a slice, given the following:
 //   - oldCap: current capacity
 //   - unit: in-memory size of an element
 //   - num: number of elements to add
-func GrowCap(oldCap, unit, num int) (newCap int) {
+func GrowCap(oldCap, unit, num uint) (newCap uint) {
 	// appendslice logic (if cap < 1024, *2, else *1.25):
 	//   leads to many copy calls, especially when copying bytes.
 	//   bytes.Buffer model (2*cap + n): much better for bytes.
@@ -22,33 +26,25 @@ func GrowCap(oldCap, unit, num int) (newCap int) {
 	//     50% beyond that
 
 	// unit can be 0 e.g. for struct{}{}; handle that appropriately
-	if unit <= 0 {
-		if uint64(^uint(0)) == ^uint64(0) { // 64-bit
-			var maxInt64 uint64 = 1<<63 - 1 // prevent failure with overflow int on 32-bit (386)
-			return int(maxInt64)            // math.MaxInt64
-		}
-		return 1<<31 - 1 //  math.MaxInt32
+	maxCap := num + (oldCap * 3 / 2)
+	if unit == 0 || maxCap > MaxArrayLen || maxCap < oldCap { // handle wraparound, etc
+		return MaxArrayLen
 	}
 
-	// handle if num < 0, cap=0, etc.
-
-	var t1 int = 1024 // default thresholds for large values
+	var t1 uint = 1024 // default thresholds for large values
 	if unit <= 4 {
 		t1 = 8 * 1024
 	} else if unit <= 16 {
 		t1 = 2 * 1024
 	}
 
-	if oldCap <= 0 {
-		newCap = 2
-	} else if oldCap <= t1 { // [0,t1]
-		newCap = oldCap * 2
-	} else { // (t1,infinity]
-		newCap = oldCap * 3 / 2
-	}
-
-	if num > 0 && newCap < num+oldCap {
-		newCap = num + oldCap
+	newCap = 2 + num
+	if oldCap > 0 {
+		if oldCap <= t1 { // [0,t1]
+			newCap = num + (oldCap * 2)
+		} else { // (t1,infinity]
+			newCap = maxCap
+		}
 	}
 
 	// ensure newCap takes multiples of a cache line (size is a multiple of 64)

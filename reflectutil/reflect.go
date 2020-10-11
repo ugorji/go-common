@@ -398,8 +398,8 @@ func ExpandSliceValue(s reflect.Value, num int) reflect.Value {
 		return s.Slice(0, l1)
 	}
 	st := s.Type()
-	c1 := GrowCap(c0, int(st.Elem().Size()), num)
-	s2 := reflect.MakeSlice(st, l1, c1)
+	c1 := GrowCap(uint(c0), uint(st.Elem().Size()), uint(num))
+	s2 := reflect.MakeSlice(st, l1, int(c1))
 	// println("expandslicevalue: cap-old: ", c0, ", cap-new: ", c1, ", len-new: ", l1)
 	reflect.Copy(s2, s)
 	return s2
