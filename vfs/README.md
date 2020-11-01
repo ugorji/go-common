@@ -16,6 +16,18 @@ Package vfs implements a virtual file system.
 ## Exported Package API
 
 ```go
-type Metadata struct{ ... }
+var ErrInvalid = os.ErrInvalid
+var ErrReadNotImmutable = errors.New("vfs: cannot read immutable contents")
+type FS interface{ ... }
+type File interface{ ... }
+type FileInfo interface{ ... }
+type MemFS struct{ ... }
+type MemFile struct{ ... }
+type OsFS struct{ ... }
+    func NewOsFS(fpath string) (z *OsFS, err error)
 type Vfs struct{ ... }
+type WithReadDir interface{ ... }
+type WithReadImmutable interface{ ... }
+type ZipFS struct{ ... }
+    func NewZipFS(r *zip.ReadCloser) (z *ZipFS)
 ```

@@ -2,168 +2,154 @@ package vfs
 
 import (
 	"archive/zip"
-	"fmt"
+	"errors"
 	"io"
 	"os"
-	"path/filepath"
 	"regexp"
+	"time"
 
 	"github.com/ugorji/go-common/errorutil"
 )
 
-const (
-	vfsDirType vfsPathType = iota + 1
-	vfsZipType
-)
+var ErrReadNotImmutable = errors.New("vfs: cannot read immutable contents")
+var ErrInvalid = os.ErrInvalid
 
-//Information about a vfs path
-type Metadata struct {
-	ModTimeNs int64
+// FileInfo holds file metadata.
+//
+// It is intentionally a subset of os.FileInfo, so that it can interop well with the standard lib.
+type FileInfo interface {
+	Name() string       // base name of the file
+	Size() int64        // length in bytes for regular files; system-dependent for others
+	ModTime() time.Time // modification time
+	IsDir() bool        // abbreviation for Mode().IsDir()
 }
 
-/*
-Vfs provides a simple virtual file system.
+// File is an open'ed entry in a file system
+type File interface {
+	io.ReadCloser
+	Stat() (FileInfo, error)
+}
 
-User can request a file from a sequence of directories or zip files,
-and once it is located, it is returned as a ReadCloser,
-along with some metadata (like lasModTime, etc).
-*/
+// WithReadImmutable is implemented by Files
+// that store their content as an uncompressed immutable string, can provide
+// the ReadImmutable method for efficient use.
+type WithReadImmutable interface {
+	ReadImmutable() (string, error)
+}
+
+// WithReadDir is implemented by Directories
+// to get a listing of the files in them.
+type WithReadDir interface {
+	ReadDir(n int) ([]FileInfo, error)
+}
+
+// FS defines the interface for a filesystem (e.g. directory, zip-based, in-memory).
+type FS interface {
+	// Open will open a file given its path.
+	Open(name string) (File, error)
+	// Close will discard resources in use.
+	Close() error
+	// Matches returns a list of paths within the FS that match a regexp (if defined), and
+	// do not match a second regexp (if defined), with an option to include or ignore directories.
+	Matches(match, notMatch *regexp.Regexp, includeDirs bool) (names []string, err error)
+	// RootFiles defines all the top level files.
+	//
+	// For example, if there is a filesystem with just 2 files, there's no single root directory
+	// but those 2 files are the root files.
+	RootFiles() (infos []FileInfo, err error)
+}
+
+// Vfs provides a simple virtual file system.
+//
+// User can request a file from a sequence of directories or zip files,
+// and once it is located, it is returned as a ReadCloser,
+// along with some metadata (like lasModTime, etc).
 type Vfs struct {
-	pathinfos []*pathInfo
+	fs []FS
 }
 
-type vfsPathType int32
-
-type pathInfo struct {
-	path string
-	typ  vfsPathType
-	zrc  *zip.ReadCloser
-}
-
-//structure used during walks
-type vfsDirwalk struct {
-	base string          //the base path (so we can ensure that it is not included in matches)
-	m    map[string]bool //the paths which have been checked
-	l    []string        //the actual matches
-	r    *regexp.Regexp  //the regular expression to match against
-}
-
-// Add a path to the Vfs. This path can be a directory or a zip file.
-// Note: If a zip file, we open it for reading right away, and keep it open
-// till Close is explicitly called.
-func (vfs *Vfs) Add(failOnMissingFile bool, path string) error {
-	if vfs.pathinfos == nil {
-		vfs.pathinfos = make([]*pathInfo, 0, 4)
-	}
+// Add a FS to the Vfs based off the path, which is either a directory, a zip file or other file.
+//
+// Any zip file added is immediately opened for reading right away,
+// and keept it open until Close is explicitly called.
+func (vfs *Vfs) Add(failOnMissingFile bool, path string) (err error) {
 	fi, err := os.Stat(path)
 	if err != nil {
-		if failOnMissingFile {
-			return err
-		} else {
-			return nil
+		if !failOnMissingFile {
+			err = nil
 		}
+		return
 	}
-	if fi.IsDir() {
-		vfs.pathinfos = append(vfs.pathinfos, &pathInfo{path, vfsDirType, nil})
-	} else if !fi.IsDir() {
-		rc, err := zip.OpenReader(path)
-		if err != nil {
-			return err
-		}
-		vfs.pathinfos = append(vfs.pathinfos, &pathInfo{path, vfsZipType, rc})
-	} else {
-		return fmt.Errorf("The path: %v, is not a directory or a zip file", path)
-	}
-	return nil
-}
-
-func (vfs *Vfs) Adds(failOnMissingFile bool, paths ...string) (err error) {
-	for _, path := range paths {
-		if err = vfs.Add(failOnMissingFile, path); err != nil {
+	var rc *zip.ReadCloser
+	if !fi.IsDir() {
+		rc, err = zip.OpenReader(path)
+		if err == nil {
+			vfs.fs = append(vfs.fs, NewZipFS(rc))
 			return
 		}
+	}
+	fs, err := NewOsFS(path)
+	if err == nil {
+		vfs.fs = append(vfs.fs, fs)
+	}
+	return
+}
+
+// Adds will call Add(...) on each path passed
+func (vfs *Vfs) Adds(failOnMissingFile bool, paths ...string) (err error) {
+	var em errorutil.Multi
+	for _, path := range paths {
+		if err = vfs.Add(failOnMissingFile, path); err != nil {
+			em = append(em, err)
+		}
+	}
+	if len(em) > 0 {
+		err = em
+	}
+	return
+}
+
+// Close this Vfs. It is especially useful for the zip type PathInfos in here.
+func (vfs *Vfs) Close() (err error) {
+	var em errorutil.Multi
+	for _, pi := range vfs.fs {
+		if err = pi.Close(); err != nil {
+			em = append(em, err)
+		}
+	}
+	if len(em) > 0 {
+		err = em
 	}
 	return
 }
 
 // Find a file from the Vfs, given a path. It will try each PathInfo in
 // sequence until it finds the path requested.
-func (vfs *Vfs) Find(path string) (io.ReadCloser, *Metadata, error) {
-	for _, pi := range vfs.pathinfos {
-		switch pi.typ {
-		case vfsDirType:
-			fp := filepath.Clean(filepath.Join(pi.path, path))
-			fi, err := os.Stat(fp)
-			if err == nil {
-				frc, err := os.Open(fp)
-				return frc, &Metadata{fi.ModTime().UnixNano()}, err
-			}
-		case vfsZipType:
-			for _, zf := range pi.zrc.File {
-				if zf.Name == path {
-					zfrc, err := zf.Open()
-					mtimeNs := zf.ModTime().UnixNano()
-					return zfrc, &Metadata{mtimeNs}, err
-				}
-			}
+func (vfs *Vfs) Find(path string) (f File, err error) {
+	for _, pi := range vfs.fs {
+		f, err = pi.Open(path)
+		if err != nil || f != nil {
+			return
 		}
 	}
-	return nil, nil, fmt.Errorf("Path not found: %v", path)
+	return
 }
 
 // Find all the paths in this Vfs which match the given reg
-func (vfs *Vfs) Matches(r *regexp.Regexp) []string {
-	l := make([]string, 0, 4)
-
-	dw := &vfsDirwalk{"", make(map[string]bool), l, r}
-
-	walkfn := func(path string, info os.FileInfo, err error) error {
-		if _, ok := dw.m[path]; !ok {
-			dw.m[path] = true
-			if len(dw.base) == len(path) {
-				return nil
-			}
-			path2 := path[len(dw.base)+1:]
-			match := dw.r.Match([]byte(path2))
-			// logfn("Vfs: Visiting: %v: match: %v", path2, match)
-			if match {
-				dw.l = append(dw.l, path2)
-			}
+func (vfs *Vfs) Matches(matchRe, notMatchRe *regexp.Regexp, includeDirs bool) []string {
+	var m = make(map[string]struct{})
+	for _, pi := range vfs.fs {
+		ss, err := pi.Matches(matchRe, notMatchRe, includeDirs)
+		if err != nil {
+			return nil
 		}
-		return nil
-	}
-
-	for _, pi := range vfs.pathinfos {
-		// logfn("PATH: %v", pi.path)
-		switch pi.typ {
-		case vfsDirType:
-			dw.base = pi.path
-			filepath.Walk(pi.path, walkfn)
-			dw.base, l = "", dw.l
-		case vfsZipType:
-			for _, zf := range pi.zrc.File {
-				if r.Match([]byte(zf.Name)) {
-					l = append(l, zf.Name)
-				}
-			}
+		for _, s := range ss {
+			m[s] = struct{}{}
 		}
 	}
-
-	return l
-}
-
-// Close this Vfs. It is especially useful for the zip type PathInfos in here.
-func (vfs *Vfs) Close() error {
-	em := make(errorutil.Multi, 0, 2)
-	for _, pi := range vfs.pathinfos {
-		if pi.typ == vfsZipType {
-			if err := pi.zrc.Close(); err != nil {
-				em = append(em, err)
-			}
-		}
+	ss := make([]string, 0, len(m))
+	for s := range m {
+		ss = append(ss, s)
 	}
-	if len(em) == 0 {
-		return nil
-	}
-	return em
+	return ss
 }
