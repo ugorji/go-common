@@ -15,6 +15,8 @@ go get github.com/ugorji/go-common/flagutil
 
 ```go
 type BoolFlagValue struct{ ... }
-type RegexpFlagValue struct{ ... }
+type RegexpFlagValue regexp.Regexp
 type SetStringFlagValue struct{ ... }
+type StringsFlagValue []string
+type StringsNoDupFlagValue []string
 ```
