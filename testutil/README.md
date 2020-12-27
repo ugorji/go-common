@@ -1,6 +1,6 @@
 # go-common/testutil
 
-This repository contains the `go-common/testutil` library (or command).
+This repository contains the `go-common/testutil` library.
 
 To install:
 

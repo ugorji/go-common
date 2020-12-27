@@ -1,6 +1,6 @@
 # go-common/ioutil
 
-This repository contains the `go-common/ioutil` library (or command).
+This repository contains the `go-common/ioutil` library.
 
 To install:
 

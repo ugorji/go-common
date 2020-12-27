@@ -1,6 +1,6 @@
 # go-common/osutil
 
-This repository contains the `go-common/osutil` library (or command).
+This repository contains the `go-common/osutil` library.
 
 To install:
 

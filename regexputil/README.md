@@ -1,6 +1,6 @@
 # go-common/regexputil
 
-This repository contains the `go-common/regexputil` library (or command).
+This repository contains the `go-common/regexputil` library.
 
 To install:
 

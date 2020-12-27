@@ -1,6 +1,6 @@
 # go-common/simpleblobstore
 
-This repository contains the `go-common/simpleblobstore` library (or command).
+This repository contains the `go-common/simpleblobstore` library.
 
 To install:
 

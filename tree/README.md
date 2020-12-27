@@ -1,6 +1,6 @@
 # go-common/tree
 
-This repository contains the `go-common/tree` library (or command).
+This repository contains the `go-common/tree` library.
 
 To install:
 

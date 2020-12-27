@@ -1,6 +1,6 @@
 # go-common/safestore
 
-This repository contains the `go-common/safestore` library (or command).
+This repository contains the `go-common/safestore` library.
 
 To install:
 

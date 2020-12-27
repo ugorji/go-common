@@ -1,6 +1,6 @@
 # go-common/feed
 
-This repository contains the `go-common/feed` library (or command).
+This repository contains the `go-common/feed` library.
 
 To install:
 

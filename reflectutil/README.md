@@ -1,6 +1,6 @@
 # go-common/reflectutil
 
-This repository contains the `go-common/reflectutil` library (or command).
+This repository contains the `go-common/reflectutil` library.
 
 To install:
 

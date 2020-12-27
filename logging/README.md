@@ -1,6 +1,6 @@
 # go-common/logging
 
-This repository contains the `go-common/logging` library (or command).
+This repository contains the `go-common/logging` library.
 
 To install:
 

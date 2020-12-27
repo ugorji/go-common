@@ -1,6 +1,6 @@
 # go-common/pool
 
-This repository contains the `go-common/pool` library (or command).
+This repository contains the `go-common/pool` library.
 
 To install:
 

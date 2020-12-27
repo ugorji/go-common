@@ -1,6 +1,6 @@
 # go-common/vfs
 
-This repository contains the `go-common/vfs` library (or command).
+This repository contains the `go-common/vfs` library.
 
 To install:
 

@@ -1,6 +1,6 @@
 # go-common/combinationgen
 
-This repository contains the `go-common/combinationgen` library (or command).
+This repository contains the `go-common/combinationgen` library.
 
 To install:
 

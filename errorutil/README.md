@@ -1,6 +1,6 @@
 # go-common/errorutil
 
-This repository contains the `go-common/errorutil` library (or command).
+This repository contains the `go-common/errorutil` library.
 
 To install:
 

@@ -1,6 +1,6 @@
 # go-common/bits
 
-This repository contains the `go-common/bits` library (or command).
+This repository contains the `go-common/bits` library.
 
 To install:
 

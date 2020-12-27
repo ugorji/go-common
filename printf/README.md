@@ -1,6 +1,6 @@
 # go-common/printf
 
-This repository contains the `go-common/printf` library (or command).
+This repository contains the `go-common/printf` library.
 
 To install:
 

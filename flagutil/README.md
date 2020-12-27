@@ -1,6 +1,6 @@
 # go-common/flagutil
 
-This repository contains the `go-common/flagutil` library (or command).
+This repository contains the `go-common/flagutil` library.
 
 To install:
 

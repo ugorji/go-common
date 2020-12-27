@@ -1,6 +1,6 @@
 # go-common/runtimeutil
 
-This repository contains the `go-common/runtimeutil` library (or command).
+This repository contains the `go-common/runtimeutil` library.
 
 To install:
 
