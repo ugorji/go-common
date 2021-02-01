@@ -19,7 +19,7 @@ func GrowCap(oldCap, unit, num uint) (newCap uint) {
 	//     else          newcap = 1.5x
 	//
 	// t1 is always >= 1024.
-	// This means that, if unit size >= 16, then always do 2x or 1.5x (ie t1, t2, t3 are all same)
+	// This means that, if unit size >= 16, then always do 2x or 1.5x
 	//
 	// With this, appending for bytes increase by:
 	//    100% up to 4K
@@ -31,27 +31,29 @@ func GrowCap(oldCap, unit, num uint) (newCap uint) {
 		return MaxArrayLen
 	}
 
-	var t1 uint = 1024 // default thresholds for large values
+	const baseThreshold = 1024
+	const cacheLineSize = 64
+
+	var t1 uint = baseThreshold // default thresholds for large values
 	if unit <= 4 {
-		t1 = 8 * 1024
+		t1 = 8 * baseThreshold
 	} else if unit <= 16 {
-		t1 = 2 * 1024
+		t1 = 2 * baseThreshold
 	}
 
-	newCap = 2 + num
-	if oldCap > 0 {
-		if oldCap <= t1 { // [0,t1]
-			newCap = num + (oldCap * 2)
-		} else { // (t1,infinity]
-			newCap = maxCap
-		}
+	if oldCap == 0 {
+		newCap = 2 + num
+	} else if oldCap <= t1 { // [0,t1]
+		newCap = num + oldCap + oldCap // num+(oldCap*2)
+	} else { // (t1,infinity]
+		newCap = maxCap
 	}
 
-	// ensure newCap takes multiples of a cache line (size is a multiple of 64)
+	// ensure newCap takes multiples of a cache line (size is a multiple of cacheLineSize).
+	// newcap*unit need not be divisible by the lowest common multiple of unit and cachelinesize.
 	t1 = newCap * unit
-	if t2 := t1 % 64; t2 != 0 {
-		t1 += 64 - t2
-		newCap = t1 / unit
+	if t2 := t1 % cacheLineSize; t2 != 0 {
+		newCap = (t1 + cacheLineSize - t2) / unit
 	}
 
 	return
